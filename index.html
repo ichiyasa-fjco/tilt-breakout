@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0f23">
+<title>TILT BREAKER — 傾きで遊ぶブロック崩し</title>
+<style>
+  :root{color-scheme:dark;--bg:#070d1d;--panel:#111a32;--text:#edf5ff;--dim:#9aabc6;--cyan:#49e5ed;--violet:#9d88ff;--line:#243454;--radius:18px}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100dvh;background:radial-gradient(ellipse at 50% -25%,#1b2e51 0%,#0b1329 43%,#070d1d 88%);color:var(--text);font-family:system-ui,-apple-system,"Noto Sans JP","Hiragino Kaku Gothic ProN",sans-serif;-webkit-tap-highlight-color:transparent;overscroll-behavior-y:contain}
+  button,input{font:inherit}
+  button{touch-action:manipulation;cursor:pointer}
+  button:focus-visible,input:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
+  .app{width:min(100% - 24px,570px);margin:0 auto;padding:12px 0 calc(22px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:9px}
+  .mast{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .brand{font-size:19px;font-weight:950;letter-spacing:.095em;line-height:1.2;white-space:nowrap}
+  .brand em{font-style:normal;color:var(--cyan)}
+  .sub{font-size:10px;letter-spacing:.15em;color:var(--dim);margin-top:2px;font-weight:650}
+  .smallBtns{display:flex;gap:7px}
+  .smallBtn{border:1px solid var(--line);color:#c5d8ee;background:#111b34;border-radius:10px;padding:9px 11px;font-size:13px;font-weight:750}
+  .smallBtn[aria-pressed="true"]{border-color:#4b7697;background:#193048;color:#c8faff}
+  .stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}
+  .stat{border:1px solid #233550;background:#101b32cc;border-radius:12px;text-align:center;padding:7px 4px}
+  .stat .cap{font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--dim)}
+  .stat .val{font-size:21px;line-height:1.2;letter-spacing:.02em;font-weight:850;font-variant-numeric:tabular-nums}
+  .stat .val.lives{color:#ffd980}
+  .stage{position:relative;align-self:center;width:min(100%,calc((100dvh - 280px)*.667));min-width:0;aspect-ratio:2/3;background:#081127;border:1px solid #314764;border-radius:16px;overflow:hidden;box-shadow:0 18px 55px #01040c8c,0 0 28px #42b2ea17;touch-action:none;user-select:none}
+  @media(max-height:680px){.stage{width:min(100%,calc((100dvh - 235px)*.667))}.app{gap:6px;padding-top:7px}.sub{display:none}.legend{display:none}}
+  canvas{display:block;width:100%;height:100%;touch-action:none;outline:0}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;pointer-events:none;background:linear-gradient(180deg,#06132c38,#06132cc9 46%,#06132c86);transition:opacity .2s;gap:12px;padding:24px}
+  .overlay.hidden{opacity:0;visibility:hidden}
+  .overlay .kicker{color:#75edfa;letter-spacing:.2em;font-size:12px;font-weight:800;text-shadow:0 0 17px #69dbff7c}
+  .overlay h1{margin:0;font-size:clamp(28px,7.2vw,43px);line-height:1.1;font-weight:1000;letter-spacing:.035em;text-shadow:0 4px 20px #000a}
+  .overlay p{margin:0;line-height:1.8;font-size:13px;font-weight:650;color:#d3e1f6}
+  .overlay .hint{padding:8px 12px;background:#0b1833bd;border:1px solid #355071;border-radius:10px;max-width:300px}
+  .actions{display:flex;gap:9px;align-items:stretch}
+  .primary{flex:1;border:1px solid #81f6fd;color:#071524;font-weight:900;letter-spacing:.025em;background:linear-gradient(135deg,#79f3fa,#45cfe9);border-radius:12px;padding:11px 15px;box-shadow:0 7px 18px #36d9e23a}
+  .secondary{flex:none;border:1px solid #46607d;background:#15243e;color:#e2efff;border-radius:12px;padding:10px 13px;font-size:13px;font-weight:800}
+  .controls{border:1px solid #243751;border-radius:14px;background:#0f1a31d9;padding:11px 12px;display:flex;flex-direction:column;gap:9px}
+  .controlHead{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+  .caption{font-size:12px;font-weight:850;color:#d1dff1}
+  .modes{display:flex;gap:5px;background:#070e21;padding:4px;border-radius:10px}
+  .mode{border:0;background:transparent;color:#99aac5;font-size:12px;border-radius:7px;padding:7px 11px;font-weight:800}
+  .mode.active{background:#283d5c;color:#a7f7ff;box-shadow:0 2px 8px #0005}
+  .footControls{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+  .sensor{display:flex;align-items:center;gap:7px;font-size:11px;color:#9eb2cd;font-weight:700;min-width:0}
+  .dot{width:7px;height:7px;border-radius:50%;background:#8f9db0;box-shadow:0 0 0 3px #ffffff10;flex-shrink:0}
+  .dot.ok{background:#48edc4;box-shadow:0 0 0 3px #40e9c621}
+  .dot.bad{background:#ffad78}
+  .config{display:flex;align-items:center;gap:6px}
+  .micro{background:#152944;border:1px solid #324b6c;color:#cbdcf1;font-size:11px;padding:6px 9px;border-radius:8px;font-weight:800;white-space:nowrap}
+  .micro.on{color:#78f2fb;border-color:#518f9b}
+  .legend{display:flex;justify-content:center;flex-wrap:wrap;gap:12px 18px;color:#a5b6cd;font-size:11px;line-height:1.5}
+  .token{font-weight:900;margin-right:3px}.token.a{color:#8e92ff}.token.b{color:#ffd16e}
+  .notice{font-size:11px;text-align:center;color:#8194b3;line-height:1.5;margin:0}
+  @media (prefers-reduced-motion:reduce){.overlay{transition:none}}
+</style>
+</head>
+<body>
+<main class="app">
+  <header class="mast">
+    <div><div class="brand">TILT <em>BREAKER</em></div><div class="sub">TILT TO PLAY · CLASSIC BREAKOUT</div></div>
+    <div class="smallBtns"><button class="smallBtn" id="soundBtn" aria-pressed="true" type="button" title="サウンド">♪ ON</button><button class="smallBtn" id="restartBtn" type="button" title="最初から">↻ リセット</button></div>
+  </header>
+  <div class="stats" aria-live="polite">
+    <div class="stat"><div class="cap">SCORE</div><div class="val" id="score">0</div></div>
+    <div class="stat"><div class="cap">BEST</div><div class="val" id="best">0</div></div>
+    <div class="stat"><div class="cap">残りボール</div><div class="val lives" id="lives">● ● ●</div></div>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="game" aria-label="ブロック崩しのプレイ画面"></canvas>
+    <div class="overlay" id="overlay"><div class="kicker" id="overlayKicker">TILT CONTROL</div><h1 id="overlayTitle">BREAK OUT!</h1><p class="hint" id="overlayText">タブレットを左右に傾けてバーを操作。<br>ブロックをすべて壊そう！</p></div>
+  </div>
+  <div class="actions"><button class="primary" id="playBtn" type="button">▶ ゲーム開始</button><button class="secondary" id="calBtn" type="button">◎ 中心を設定</button></div>
+  <section class="controls" aria-label="ゲーム操作設定">
+    <div class="controlHead"><span class="caption">操作方法</span><div class="modes"><button class="mode active" data-mode="tilt" type="button">◈ 傾き操作</button><button class="mode" data-mode="touch" type="button">☝ タッチ操作</button></div></div>
+    <div class="footControls"><div class="sensor"><span class="dot" id="sensorDot"></span><span id="sensorText" role="status">センサー待機中 · 開始時に有効化</span></div><div class="config"><button class="micro" id="invertBtn" type="button" aria-pressed="false">左右反転: OFF</button></div></div>
+  </section>
+  <div class="legend"><span><span class="token a">×3</span>ボールが3つに分裂</span><span><span class="token b">+1</span>残りボールが1増加</span><span>アイテムはバーでキャッチ</span></div>
+  <p class="notice">傾きが動かない場合は「中心を設定」をタップ。センサーが使えないときは「タッチ操作」に切り替えられます。</p>
+</main>
+<script>
+(() => {
+  'use strict';
+  const W=480,H=720, TAU=Math.PI*2, R=8;
+  const $ = id => document.getElementById(id);
+  const canvas=$('game'), ctx=canvas.getContext('2d',{alpha:false});
+  const ui={score:$('score'),best:$('best'),lives:$('lives'),overlay:$('overlay'),kicker:$('overlayKicker'),title:$('overlayTitle'),overlayText:$('overlayText'),play:$('playBtn'),cal:$('calBtn'),sound:$('soundBtn'),restart:$('restartBtn'),sensorText:$('sensorText'),sensorDot:$('sensorDot'),invert:$('invertBtn'),stage:$('stage')};
+  const palette=['#f19bfd','#c69dff','#869dfb','#61c8fa','#51e3cf','#ffe08c','#ff9e9e'];
+  let state='ready', score=0, lives=3, best=0, mode='tilt', invert=false, muted=false;
+  let balls=[],bricks=[],items=[],sparks=[],stars=[],floatTexts=[];
+  let paddle={x:W/2-53,y:655,w:106,h:15,target:W/2};
+  let sensor={current:null,reference:null,lastAt:0,readings:0,requested:false,denied:false};
+  let touchX=W/2, pointerDown=false, idlePulse=0, shake=0, soundCtx=null, lastTime=0, accum=0;
+  let nextSpark=0;
+  try {best=Number(localStorage.getItem('tilt-breaker-best')||0)||0;}catch(e){}
+  ui.best.textContent=best.toLocaleString('ja-JP');
+  function rnd(a,b){return a+Math.random()*(b-a)}
+  function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+  function resize(){let dpr=Math.min(window.devicePixelRatio||1,2);canvas.width=Math.round(W*dpr);canvas.height=Math.round(H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0)}
+  resize();window.addEventListener('resize',resize,{passive:true});
+  if(window.ResizeObserver) new ResizeObserver(resize).observe(ui.stage);
+  function initializeStars(){stars=Array.from({length:36},(_,i)=>({x:rnd(10,W-10),y:rnd(12,H-28),r:rnd(.5,1.5),p:rnd(0,TAU)}))}
+  initializeStars();
+  function updateHud(){ui.score.textContent=score.toLocaleString('ja-JP');ui.lives.textContent=lives<=5?'● '.repeat(lives).trim():('● × '+lives);ui.best.textContent=best.toLocaleString('ja-JP')}
+  function setScore(n){score+=n;if(score>best){best=score;try{localStorage.setItem('tilt-breaker-best',String(best))}catch(e){}}updateHud()}
+  function spawnBricks(){bricks=[];const cols=7,rows=7,gapX=7,gapY=8,padX=24,y0=113,bw=(W-2*padX-gapX*(cols-1))/cols,bh=25;
+    for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){bricks.push({x:padX+col*(bw+gapX),y:y0+row*(bh+gapY),w:bw,h:bh,color:palette[row],alive:true})}}
+  function newBall(x,y,vx,vy){return {x,y,vx,vy,r:R,trail:[],dead:false}}
+  function resetBall(){balls=[newBall(paddle.x+paddle.w/2,paddle.y-11,0,0)];state='ready';syncUI()}
+  function newGame(){score=0;lives=3;items=[];sparks=[];floatTexts=[];shake=0;paddle.x=W/2-paddle.w/2;paddle.target=W/2;touchX=W/2;spawnBricks();resetBall();updateHud()}
+  function syncUI(){const o=ui.overlay;
+    if(state==='running'){o.classList.add('hidden');ui.play.textContent='Ⅱ 一時停止'}
+    if(state==='ready'){o.classList.remove('hidden');ui.kicker.textContent=score?'NEXT BALL':'TILT CONTROL';ui.title.textContent=score?'READY?':'BREAK OUT!';ui.overlayText.innerHTML=score?'準備ができたらボールを発射！':'タブレットを左右に傾けてバーを操作。<br>ブロックをすべて壊そう！';ui.play.textContent=score?'▶ ボールを発射':'▶ ゲーム開始'}
+    if(state==='paused'){o.classList.remove('hidden');ui.kicker.textContent='PAUSE';ui.title.textContent='一時停止';ui.overlayText.textContent='再開ボタンでゲームに戻れます';ui.play.textContent='▶ 再開'}
+    if(state==='over'){o.classList.remove('hidden');ui.kicker.textContent='GAME OVER';ui.title.textContent='GAME OVER';ui.overlayText.textContent=`最終スコア ${score.toLocaleString('ja-JP')} 点`;ui.play.textContent='↻ もう一度遊ぶ'}
+    if(state==='win'){o.classList.remove('hidden');ui.kicker.textContent='CLEAR!';ui.title.textContent='STAGE CLEAR';ui.overlayText.textContent=`すべてのブロックを破壊！ ${score.toLocaleString('ja-JP')} 点`;ui.play.textContent='↻ もう一度遊ぶ'}
+  }
+  function playSound(f=450,d=.055,type='sine',gain=.055){if(muted)return;try{if(!soundCtx)soundCtx=new(window.AudioContext||window.webkitAudioContext)();if(soundCtx.state==='suspended')soundCtx.resume();const t=soundCtx.currentTime,osc=soundCtx.createOscillator(),vol=soundCtx.createGain();osc.type=type;osc.frequency.setValueAtTime(f,t);osc.frequency.exponentialRampToValueAtTime(Math.max(50,f*.85),t+d);vol.gain.setValueAtTime(gain,t);vol.gain.exponentialRampToValueAtTime(.0001,t+d);osc.connect(vol);vol.connect(soundCtx.destination);osc.start(t);osc.stop(t+d+.005)}catch(e){}}
+  function launch(){let ball=balls[0];if(!ball)return;ball.vx=rnd(-95,95);ball.vy=-Math.sqrt(355**2-ball.vx**2);state='running';syncUI();playSound(520,.11,'triangle')}
+  function showSensor(message,ok=false,bad=false){ui.sensorText.textContent=message;ui.sensorDot.className='dot'+(ok?' ok':bad?' bad':'')}
+  function angle(){const n=window.screen&&window.screen.orientation?window.screen.orientation.angle:(window.orientation||0);return ((n%360)+360)%360}
+  function onOrientation(e){let v, a=angle();if(a===90)v=-e.beta;else if(a===270)v=e.beta;else v=(a===180?-1:1)*e.gamma;
+    if(typeof v!=='number'||!Number.isFinite(v))return;
+    sensor.current=v;sensor.lastAt=performance.now();sensor.readings++;
+    if(sensor.reference===null)sensor.reference=v;
+    if(mode==='tilt' && (sensor.readings%28===1||sensor.readings===1))showSensor('傾きセンサー接続中 ✓',true);
+  }
+  window.addEventListener('deviceorientation',onOrientation,true);
+  function onRotation(){sensor.reference=null;showSensor('画面回転を検知 · 中心を再設定します')}
+  if(window.screen?.orientation?.addEventListener)window.screen.orientation.addEventListener('change',onRotation);
+  window.addEventListener('orientationchange',onRotation);
+  async function sensorPermission(){
+    if(mode!=='tilt')return;
+    sensor.requested=true;
+    try{
+      if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'){
+        const result=await DeviceOrientationEvent.requestPermission();
+        if(result!=='granted'){sensor.denied=true;showSensor('センサーが許可されません · タッチ操作を使用',false,true);return}
+      }
+      if(sensor.readings===0)showSensor('傾きセンサーの応答を待っています…');
+    }catch(e){sensor.denied=true;showSensor('センサーを利用できません · タッチ操作を使用',false,true)}
+  }
+  function calibrate(){
+    if(sensor.current!==null&&performance.now()-sensor.lastAt<2400){sensor.reference=sensor.current;paddle.target=W/2;showSensor('中心を設定しました ✓',true);playSound(660,.05)}
+    else {showSensor('センサーが未検出 · HTTPSで開くかタッチ操作を選択',false,true);sensorPermission()}
+  }
+  ui.cal.addEventListener('click',calibrate);
+  ui.play.addEventListener('click',()=>{
+    if(state==='over'||state==='win'){newGame();sensorPermission();launch()}
+    else if(state==='ready'){sensorPermission();launch()}
+    else if(state==='running'){state='paused';syncUI()}
+    else if(state==='paused'){state='running';syncUI()}
+    if(!sensor.requested&&mode==='tilt')sensorPermission();
+  });
+  ui.restart.addEventListener('click',()=>{newGame();playSound(320,.11,'triangle')});
+  ui.sound.addEventListener('click',()=>{muted=!muted;ui.sound.textContent=muted?'♪ OFF':'♪ ON';ui.sound.setAttribute('aria-pressed',String(!muted));if(!muted)playSound(700,.07)});
+  ui.invert.addEventListener('click',()=>{invert=!invert;ui.invert.textContent='左右反転: '+(invert?'ON':'OFF');ui.invert.classList.toggle('on',invert);ui.invert.setAttribute('aria-pressed',String(invert))});
+  document.querySelectorAll('[data-mode]').forEach(btn=>btn.addEventListener('click',()=>{
+    mode=btn.dataset.mode;document.querySelectorAll('[data-mode]').forEach(el=>el.classList.toggle('active',el.dataset.mode===mode));
+    if(mode==='touch'){showSensor('タッチ操作中 · 画面を左右になぞって移動',true);paddle.target=touchX}
+    else {sensorPermission();if(sensor.current!==null)calibrate();else showSensor('傾きセンサーの応答を待っています…')}
+  }));
+  function pointerX(e){const box=canvas.getBoundingClientRect();return clamp((e.clientX-box.left)/box.width*W,0,W)}
+  canvas.addEventListener('pointerdown',e=>{e.preventDefault();pointerDown=true;try{canvas.setPointerCapture(e.pointerId)}catch(err){};if(mode==='touch'){touchX=pointerX(e);paddle.target=touchX}if(state==='ready'){sensorPermission();launch()}},{passive:false});
+  canvas.addEventListener('pointermove',e=>{if(mode==='touch'&&(pointerDown||e.pointerType==='mouse')){touchX=pointerX(e);paddle.target=touchX}},{passive:true});
+  canvas.addEventListener('pointerup',()=>{pointerDown=false});canvas.addEventListener('pointercancel',()=>{pointerDown=false});
+  let arrow=0;
+  document.addEventListener('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();arrow=e.key==='ArrowLeft'?-1:1}else if(e.code==='Space'){e.preventDefault();ui.play.click()}});
+  document.addEventListener('keyup',e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight')arrow=0});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden&&state==='running'){state='paused';syncUI()}});
+  function blast(x,y,color,n=9){for(let i=0;i<n;i++){const a=rnd(0,TAU),s=rnd(35,160),life=rnd(.27,.6);sparks.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life,max:life,color})}if(sparks.length>180)sparks.splice(0,sparks.length-180)}
+  function textPopup(x,y,text,color){floatTexts.push({x,y,text,color,life:.9})}
+  function dropItem(brick){if(Math.random()>=.20)return;items.push({x:brick.x+brick.w/2,y:brick.y+brick.h/2,vy:135,r:15,kind:Math.random()<.5?'split':'life',pulse:rnd(0,TAU)})}
+  function triplicate(){if(!balls.length)return;const base=balls[Math.floor(Math.random()*balls.length)],v=Math.hypot(base.vx,base.vy)||355,a=Math.atan2(base.vy,base.vx),offset=.40;
+    // One currently moving ball becomes three total: the original plus two copies.
+    base.vx=Math.cos(a)*v;base.vy=Math.sin(a)*v;
+    for(const da of [-offset,offset])balls.push(newBall(base.x+Math.cos(a+da)*4,base.y+Math.sin(a+da)*4,Math.cos(a+da)*v,Math.sin(a+da)*v));
+    blast(base.x,base.y,'#9994ff',28);textPopup(base.x,base.y-32,'MULTI ×3','#c3b8ff');playSound(850,.23,'triangle',.08);
+  }
+  function getItem(item){if(item.kind==='life'){lives++;updateHud();textPopup(item.x,item.y-15,'+1 BALL','#ffd87b');blast(item.x,item.y,'#ffd278',20);playSound(950,.20,'sine',.065)}else triplicate()}
+  function brickCollision(b,brick,px,py){
+    const closestX=clamp(b.x,brick.x,brick.x+brick.w),closestY=clamp(b.y,brick.y,brick.y+brick.h),dx=b.x-closestX,dy=b.y-closestY;
+    if(dx*dx+dy*dy>b.r*b.r)return false;
+    // Old position resolves the collision face before reflecting the velocity.
+    const wasAbove=py+b.r<=brick.y+2,wasBelow=py-b.r>=brick.y+brick.h-2;
+    const wasLeft=px+b.r<=brick.x+2,wasRight=px-b.r>=brick.x+brick.w-2;
+    if(wasAbove){b.y=brick.y-b.r-.1;b.vy=-Math.abs(b.vy)}
+    else if(wasBelow){b.y=brick.y+brick.h+b.r+.1;b.vy=Math.abs(b.vy)}
+    else if(wasLeft){b.x=brick.x-b.r-.1;b.vx=-Math.abs(b.vx)}
+    else if(wasRight){b.x=brick.x+brick.w+b.r+.1;b.vx=Math.abs(b.vx)}
+    else{const overlapX=b.r+brick.w/2-Math.abs(b.x-(brick.x+brick.w/2));const overlapY=b.r+brick.h/2-Math.abs(b.y-(brick.y+brick.h/2));if(overlapX<overlapY)b.vx*=-1;else b.vy*=-1}
+    return true;
+  }
+  function step(dt){
+    idlePulse+=dt;shake=Math.max(0,shake-dt*5);
+    // Tilt is measured relative to the position chosen as the center.
+    if(arrow){paddle.target=clamp(paddle.target+arrow*370*dt,paddle.w/2,W-paddle.w/2)}
+    else if(mode==='tilt'&&sensor.current!==null&&sensor.reference!==null&&performance.now()-sensor.lastAt<2600){
+      let diff=clamp(sensor.current-sensor.reference,-24,24);if(Math.abs(diff)<.65)diff=0;
+      paddle.target=clamp(W/2+diff*12.8*(invert?-1:1),paddle.w/2+9,W-paddle.w/2-9);
+    }
+    const center=paddle.x+paddle.w/2;
+    paddle.x=clamp(center+(paddle.target-center)*(1-Math.exp(-15*dt))-paddle.w/2,8,W-paddle.w-8);
+    if(state==='ready'&&balls[0]){balls[0].x=paddle.x+paddle.w/2;balls[0].y=paddle.y-12}
+    if(state!=='running'){updateEffects(dt);return}
+    for(const b of balls){
+      const prevX=b.x,prevY=b.y;b.x+=b.vx*dt;b.y+=b.vy*dt;
+      b.trail.push({x:b.x,y:b.y});if(b.trail.length>6)b.trail.shift();
+      if(b.x-b.r<12){b.x=12+b.r;b.vx=Math.abs(b.vx);playSound(255,.036,'sine',.025)}
+      if(b.x+b.r>W-12){b.x=W-12-b.r;b.vx=-Math.abs(b.vx);playSound(255,.036,'sine',.025)}
+      if(b.y-b.r<62){b.y=62+b.r;b.vy=Math.abs(b.vy);playSound(255,.036,'sine',.025)}
+      if(b.vy>0&&prevY+b.r<=paddle.y+7&&b.y+b.r>=paddle.y&&b.y-b.r<paddle.y+paddle.h&&b.x+b.r>=paddle.x&&b.x-b.r<=paddle.x+paddle.w){
+        const off=clamp((b.x-(paddle.x+paddle.w/2))/(paddle.w/2),-1,1);
+        const ang=off*1.12,spd=clamp(Math.hypot(b.vx,b.vy)+5,355,520);
+        b.vx=Math.sin(ang)*spd+(Math.abs(off)<.08?(Math.random()<.5?-10:10):0);b.vy=-Math.cos(ang)*spd;b.y=paddle.y-b.r-.1;
+        blast(b.x,paddle.y,'#71edf2',5);playSound(320+Math.abs(off)*170,.06,'triangle',.04);
+      }
+      for(const brick of bricks){if(!brick.alive)continue;
+        if(brickCollision(b,brick,prevX,prevY)){
+          brick.alive=false;setScore(100);blast(brick.x+brick.w/2,brick.y+brick.h/2,brick.color,11);dropItem(brick);playSound(460+rnd(0,240),.06,'triangle',.045);shake=.65;break;
+        }
+      }
+      if(b.y-b.r>H+15)b.dead=true;
+    }
+    balls=balls.filter(b=>!b.dead);
+    bricks=bricks.filter(b=>b.alive);
+    for(let i=items.length-1;i>=0;i--){const item=items[i];item.y+=item.vy*dt;item.pulse+=dt*4;
+      if(item.y+item.r>paddle.y&&item.y-item.r<paddle.y+paddle.h+5&&item.x+item.r>paddle.x&&item.x-item.r<paddle.x+paddle.w){getItem(item);items.splice(i,1)}
+      else if(item.y>H+20)items.splice(i,1);
+    }
+    updateEffects(dt);
+    if(bricks.length===0){state='win';syncUI();playSound(1050,.33,'triangle',.09);return}
+    if(balls.length===0){lives--;updateHud();items=[];if(lives>0){resetBall();playSound(240,.2,'sawtooth',.04)}else{state='over';syncUI();playSound(170,.32,'sawtooth',.065)}}
+  }
+  function updateEffects(dt){for(const p of sparks){p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=130*dt;p.life-=dt}sparks=sparks.filter(p=>p.life>0);for(const t of floatTexts){t.y-=40*dt;t.life-=dt}floatTexts=floatTexts.filter(t=>t.life>0)}
+  function rounded(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r)}
+  function frame(){
+    ctx.save();ctx.fillStyle='#071227';ctx.fillRect(0,0,W,H);
+    const bg=ctx.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#102647');bg.addColorStop(.45,'#0b1c36');bg.addColorStop(1,'#081124');ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle='#729ad111';ctx.lineWidth=1;for(let x=20;x<W;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()};for(let y=20;y<H;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+    for(const s of stars){ctx.globalAlpha=.28+.20*Math.sin(idlePulse*1.2+s.p);ctx.fillStyle='#c7f6ff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,TAU);ctx.fill()}ctx.globalAlpha=1;
+    ctx.fillStyle='#c2d3ed';ctx.font='700 11px system-ui';ctx.fillText('STAGE 01  /  '+(49-bricks.length)+' / 49 BLOCKS',23,35);
+    ctx.fillStyle='#85a3c4';ctx.textAlign='right';ctx.fillText('ACTIVE BALLS  '+balls.length,W-23,35);ctx.textAlign='left';
+    ctx.strokeStyle='#315074';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(15,53);ctx.lineTo(W-15,53);ctx.stroke();
+    // Side rails and floor markers
+    ctx.strokeStyle='#3c679144';ctx.lineWidth=2;ctx.strokeRect(11,62,W-22,H-91);
+    for(let i=0;i<4;i++){ctx.strokeStyle='#3579a42d';ctx.beginPath();ctx.moveTo(20,616+i*20);ctx.lineTo(W-20,616+i*20);ctx.stroke()}
+    for(const brick of bricks){const {x,y,w,h,color}=brick;ctx.shadowColor=color;ctx.shadowBlur=9;ctx.fillStyle=color;rounded(x,y,w,h,6);ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='#ffffff46';rounded(x+2,y+2,w-4,5,2);ctx.fill();ctx.fillStyle='#0b15342f';rounded(x+3,y+h-7,w-6,4,2);ctx.fill()}
+    ctx.save();ctx.shadowBlur=shake>0?20:14;ctx.shadowColor='#5ceff6';ctx.fillStyle='#2ce7ee';rounded(paddle.x,paddle.y,paddle.w,paddle.h,8);ctx.fill();ctx.shadowBlur=0;
+    ctx.fillStyle='#caffff';rounded(paddle.x+7,paddle.y+2,paddle.w-14,4,2);ctx.fill();ctx.fillStyle='#075e80';rounded(paddle.x+paddle.w/2-9,paddle.y+5,18,6,3);ctx.fill();ctx.restore();
+    for(const item of items){const violet=item.kind==='split',c=violet?'#9992ff':'#ffd475';ctx.save();ctx.shadowBlur=14;ctx.shadowColor=c;ctx.fillStyle=violet?'#393b89':'#785324';ctx.strokeStyle=c;ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(item.x,item.y,item.r+Math.sin(item.pulse)*1.2,0,TAU);ctx.fill();ctx.stroke();ctx.shadowBlur=0;ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='900 14px system-ui';ctx.fillStyle='#fff';ctx.fillText(violet?'×3':'+1',item.x,item.y+.7);ctx.restore()}
+    for(const b of balls){for(let i=0;i<b.trail.length;i++){ctx.globalAlpha=(i+1)/(b.trail.length+3)*.36;ctx.fillStyle='#76eaff';ctx.beginPath();ctx.arc(b.trail[i].x,b.trail[i].y,2+i*.68,0,TAU);ctx.fill()};ctx.globalAlpha=1;ctx.save();ctx.shadowColor='#90ecff';ctx.shadowBlur=22;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,TAU);ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='#b4efff';ctx.beginPath();ctx.arc(b.x-2,b.y-2,3.2,0,TAU);ctx.fill();ctx.restore()}
+    for(const s of sparks){ctx.globalAlpha=clamp(s.life/s.max,0,1);ctx.fillStyle=s.color;ctx.fillRect(s.x,s.y,3,3)}ctx.globalAlpha=1;
+    for(const t of floatTexts){ctx.globalAlpha=clamp(t.life/.6,0,1);ctx.fillStyle=t.color;ctx.textAlign='center';ctx.font='900 16px system-ui';ctx.shadowBlur=12;ctx.shadowColor=t.color;ctx.fillText(t.text,t.x,t.y);ctx.shadowBlur=0}ctx.globalAlpha=1;ctx.textAlign='left';
+    ctx.restore();
+  }
+  function loop(now){if(!lastTime)lastTime=now;let delta=Math.min((now-lastTime)/1000,.05);lastTime=now;accum+=delta;const stepMs=1/120;let n=0;while(accum>=stepMs&&n<7){step(stepMs);accum-=stepMs;n++}if(n>=7)accum=0;frame();requestAnimationFrame(loop)}
+  newGame();requestAnimationFrame(loop);
+  // Helpful status if no secure-context sensor data ever arrives.
+  setInterval(()=>{if(mode!=='tilt'||state==='over'||state==='win')return;
+    if(sensor.readings===0&&sensor.requested){showSensor(window.isSecureContext?'センサーが未検出 · タッチ操作も利用可能':'HTTPSで開くと傾き操作を利用できます',false,true)}
+    else if(sensor.readings>0&&performance.now()-sensor.lastAt>4500){showSensor('センサー信号が停止 · タッチ操作も利用可能',false,true)}
+  },2500);
+})();
+</script>
+</body>
+</html>
