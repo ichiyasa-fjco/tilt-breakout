@@ -48,7 +48,7 @@
   .dot{width:7px;height:7px;border-radius:50%;background:#8f9db0;box-shadow:0 0 0 3px #ffffff10;flex-shrink:0}
   .dot.ok{background:#48edc4;box-shadow:0 0 0 3px #40e9c621}
   .dot.bad{background:#ffad78}
-  .config{display:flex;align-items:center;gap:6px}
+  .config{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
   .micro{background:#152944;border:1px solid #324b6c;color:#cbdcf1;font-size:11px;padding:6px 9px;border-radius:8px;font-weight:800;white-space:nowrap}
   .micro.on{color:#78f2fb;border-color:#518f9b}
   .legend{display:flex;justify-content:center;flex-wrap:wrap;gap:12px 18px;color:#a5b6cd;font-size:11px;line-height:1.5}
@@ -74,30 +74,33 @@
   </div>
   <div class="stage" id="stage">
     <canvas id="game" aria-label="ブロック崩しのプレイ画面"></canvas>
-    <div class="overlay" id="overlay"><div class="kicker" id="overlayKicker">TILT CONTROL</div><h1 id="overlayTitle">BREAK OUT!</h1><p class="hint" id="overlayText">タブレットを左右に傾けてバーを操作。<br>ブロックをすべて壊そう！</p></div>
+    <div class="overlay" id="overlay"><div class="kicker" id="overlayKicker">TILT CONTROL</div><h1 id="overlayTitle">BREAK OUT!</h1><p class="hint" id="overlayText">タブレットを左右・前後に傾けてバーを操作。<br>バーは画面下20%を移動できます。</p></div>
   </div>
   <div class="actions"><button class="primary" id="playBtn" type="button">▶ ゲーム開始</button><button class="secondary" id="calBtn" type="button">◎ 中心を設定</button></div>
   <section class="controls" aria-label="ゲーム操作設定">
     <div class="controlHead"><span class="caption">操作方法</span><div class="modes"><button class="mode active" data-mode="tilt" type="button">◈ 傾き操作</button><button class="mode" data-mode="touch" type="button">☝ タッチ操作</button></div></div>
-    <div class="footControls"><div class="sensor"><span class="dot" id="sensorDot"></span><span id="sensorText" role="status">センサー待機中 · 開始時に有効化</span></div><div class="config"><button class="micro" id="invertBtn" type="button" aria-pressed="false">左右反転: OFF</button></div></div>
+    <div class="footControls"><div class="sensor"><span class="dot" id="sensorDot"></span><span id="sensorText" role="status">センサー待機中 · 開始時に有効化</span></div><div class="config"><button class="micro" id="invertBtn" type="button" aria-pressed="false">左右反転: OFF</button><button class="micro" id="invertYBtn" type="button" aria-pressed="false">前後反転: OFF</button></div></div>
   </section>
   <div class="displayControl"><span class="displayStatus" id="displayStatus" role="status">ゲーム開始時に縦画面固定・画面消灯防止を設定します</span><button class="micro" id="displayBtn" type="button" hidden>⛶ 画面を再設定</button></div>
   <div class="legend"><span><span class="token a">×3</span>ボールが3つに分裂</span><span><span class="token b">+1</span>残りボールが1増加</span><span>アイテムはバーでキャッチ</span></div>
-  <p class="notice">傾きが動かない場合は「中心を設定」をタップ。全画面を解除すると縦画面固定も解除されるため、再開時に再設定されます。</p>
+  <p class="notice">左右・前後の中心姿勢は「中心を設定」で調整できます。全画面を解除すると縦画面固定も解除されるため、再開時に再設定されます。</p>
 </main>
 <script>
 (() => {
   'use strict';
   const W=480,H=720, TAU=Math.PI*2, R=8;
+  // The paddle is confined to the bottom 20% of the play field.
+  const PADDLE_ZONE_TOP=H*.80, PADDLE_Y_MIN=PADDLE_ZONE_TOP+4, PADDLE_Y_MAX=H-8-15;
+  const PADDLE_Y_CENTER=(PADDLE_Y_MIN+PADDLE_Y_MAX)/2;
   const $ = id => document.getElementById(id);
   const canvas=$('game'), ctx=canvas.getContext('2d',{alpha:false});
-  const ui={score:$('score'),best:$('best'),lives:$('lives'),overlay:$('overlay'),kicker:$('overlayKicker'),title:$('overlayTitle'),overlayText:$('overlayText'),play:$('playBtn'),cal:$('calBtn'),sound:$('soundBtn'),restart:$('restartBtn'),sensorText:$('sensorText'),sensorDot:$('sensorDot'),invert:$('invertBtn'),stage:$('stage'),displayStatus:$('displayStatus'),displayBtn:$('displayBtn')};
+  const ui={score:$('score'),best:$('best'),lives:$('lives'),overlay:$('overlay'),kicker:$('overlayKicker'),title:$('overlayTitle'),overlayText:$('overlayText'),play:$('playBtn'),cal:$('calBtn'),sound:$('soundBtn'),restart:$('restartBtn'),sensorText:$('sensorText'),sensorDot:$('sensorDot'),invert:$('invertBtn'),invertY:$('invertYBtn'),stage:$('stage'),displayStatus:$('displayStatus'),displayBtn:$('displayBtn')};
   const palette=['#f19bfd','#c69dff','#869dfb','#61c8fa','#51e3cf','#ffe08c','#ff9e9e'];
-  let state='ready', score=0, lives=3, best=0, mode='tilt', invert=false, muted=false;
+  let state='ready', score=0, lives=3, best=0, mode='tilt', invert=false, invertY=false, muted=false;
   let balls=[],bricks=[],items=[],sparks=[],stars=[],floatTexts=[];
-  let paddle={x:W/2-53,y:655,w:106,h:15,target:W/2};
+  let paddle={x:W/2-53,y:PADDLE_Y_CENTER,w:106,h:15,target:W/2,targetY:PADDLE_Y_CENTER};
   let sensor={current:null,reference:null,lastAt:0,readings:0,requested:false,denied:false};
-  let touchX=W/2, pointerDown=false, idlePulse=0, shake=0, soundCtx=null, lastTime=0, accum=0;
+  let touchX=W/2, touchY=PADDLE_Y_CENTER, pointerDown=false, idlePulse=0, shake=0, soundCtx=null, lastTime=0, accum=0;
   let nextSpark=0;
   // The screen stays awake during a session. Manual pause releases it;
   // an automatic pause on tab switch may re-acquire it on return.
@@ -215,10 +218,10 @@
     for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){bricks.push({x:padX+col*(bw+gapX),y:y0+row*(bh+gapY),w:bw,h:bh,color:palette[row],alive:true})}}
   function newBall(x,y,vx,vy){return {x,y,vx,vy,r:R,trail:[],dead:false}}
   function resetBall(){balls=[newBall(paddle.x+paddle.w/2,paddle.y-11,0,0)];state='ready';syncUI()}
-  function newGame(){score=0;lives=3;items=[];sparks=[];floatTexts=[];shake=0;paddle.x=W/2-paddle.w/2;paddle.target=W/2;touchX=W/2;spawnBricks();resetBall();updateHud()}
+  function newGame(){score=0;lives=3;items=[];sparks=[];floatTexts=[];shake=0;paddle.x=W/2-paddle.w/2;paddle.y=PADDLE_Y_CENTER;paddle.target=W/2;paddle.targetY=PADDLE_Y_CENTER;touchX=W/2;touchY=PADDLE_Y_CENTER;spawnBricks();resetBall();updateHud()}
   function syncUI(){const o=ui.overlay;
     if(state==='running'){o.classList.add('hidden');ui.play.textContent='Ⅱ 一時停止'}
-    if(state==='ready'){o.classList.remove('hidden');ui.kicker.textContent=score?'NEXT BALL':'TILT CONTROL';ui.title.textContent=score?'READY?':'BREAK OUT!';ui.overlayText.innerHTML=score?'準備ができたらボールを発射！':'タブレットを左右に傾けてバーを操作。<br>ブロックをすべて壊そう！';ui.play.textContent=score?'▶ ボールを発射':'▶ ゲーム開始'}
+    if(state==='ready'){o.classList.remove('hidden');ui.kicker.textContent=score?'NEXT BALL':'TILT CONTROL';ui.title.textContent=score?'READY?':'BREAK OUT!';ui.overlayText.innerHTML=score?'準備ができたらボールを発射！':'タブレットを左右・前後に傾けてバーを操作。<br>バーは画面下20%を移動できます。';ui.play.textContent=score?'▶ ボールを発射':'▶ ゲーム開始'}
     if(state==='paused'){o.classList.remove('hidden');ui.kicker.textContent='PAUSE';ui.title.textContent='一時停止';ui.overlayText.textContent='再開ボタンでゲームに戻れます';ui.play.textContent='▶ 再開'}
     if(state==='over'){o.classList.remove('hidden');ui.kicker.textContent='GAME OVER';ui.title.textContent='GAME OVER';ui.overlayText.textContent=`最終スコア ${score.toLocaleString('ja-JP')} 点`;ui.play.textContent='↻ もう一度遊ぶ'}
     if(state==='win'){o.classList.remove('hidden');ui.kicker.textContent='CLEAR!';ui.title.textContent='STAGE CLEAR';ui.overlayText.textContent=`すべてのブロックを破壊！ ${score.toLocaleString('ja-JP')} 点`;ui.play.textContent='↻ もう一度遊ぶ'}
@@ -227,12 +230,21 @@
   function launch(){let ball=balls[0];if(!ball)return;ball.vx=rnd(-95,95);ball.vy=-Math.sqrt(355**2-ball.vx**2);state='running';syncUI();playSound(520,.11,'triangle')}
   function showSensor(message,ok=false,bad=false){ui.sensorText.textContent=message;ui.sensorDot.className='dot'+(ok?' ok':bad?' bad':'')}
   function angle(){const n=window.screen&&window.screen.orientation?window.screen.orientation.angle:(window.orientation||0);return ((n%360)+360)%360}
-  function onOrientation(e){let v, a=angle();if(a===90)v=-e.beta;else if(a===270)v=e.beta;else v=(a===180?-1:1)*e.gamma;
-    if(typeof v!=='number'||!Number.isFinite(v))return;
-    sensor.current=v;sensor.lastAt=performance.now();sensor.readings++;
-    if(sensor.reference===null)sensor.reference=v;
-    if(mode==='tilt' && (sensor.readings%28===1||sensor.readings===1))showSensor('傾きセンサー接続中 ✓',true);
+  function onOrientation(e){
+    if(!Number.isFinite(e.beta)||!Number.isFinite(e.gamma))return;
+    // In portrait, gamma is left/right and beta is front/back.
+    // Rotate the two axes as needed when Android changes screen orientation.
+    const a=angle();let x,y;
+    if(a===90){x=-e.beta;y=e.gamma}
+    else if(a===180){x=-e.gamma;y=-e.beta}
+    else if(a===270){x=e.beta;y=-e.gamma}
+    else{x=e.gamma;y=e.beta}
+    sensor.current={x,y};sensor.lastAt=performance.now();sensor.readings++;
+    if(sensor.reference===null)sensor.reference={...sensor.current};
+    if(mode==='tilt' && (sensor.readings%28===1||sensor.readings===1))showSensor('左右・前後センサー接続中 ✓',true);
   }
+  // Angles wrap at +/-180 degrees: keep differences continuous across that boundary.
+  function angleDiff(current,reference){return ((current-reference+540)%360)-180}
   window.addEventListener('deviceorientation',onOrientation,true);
   function onRotation(){sensor.reference=null;showSensor('画面回転を検知 · 中心を再設定します')}
   if(window.screen?.orientation?.addEventListener)window.screen.orientation.addEventListener('change',onRotation);
@@ -249,7 +261,7 @@
     }catch(e){sensor.denied=true;showSensor('センサーを利用できません · タッチ操作を使用',false,true)}
   }
   function calibrate(){
-    if(sensor.current!==null&&performance.now()-sensor.lastAt<2400){sensor.reference=sensor.current;paddle.target=W/2;showSensor('中心を設定しました ✓',true);playSound(660,.05)}
+    if(sensor.current!==null&&performance.now()-sensor.lastAt<2400){sensor.reference={...sensor.current};paddle.target=W/2;paddle.targetY=PADDLE_Y_CENTER;showSensor('左右・前後の中心を設定しました ✓',true);playSound(660,.05)}
     else {showSensor('センサーが未検出 · HTTPSで開くかタッチ操作を選択',false,true);sensorPermission()}
   }
   ui.cal.addEventListener('click',calibrate);
@@ -269,18 +281,25 @@
   ui.displayBtn.addEventListener('click',()=>{if(!gameSessionActive)return;enterPortraitFullscreen();acquireWakeLock();});
   ui.sound.addEventListener('click',()=>{muted=!muted;ui.sound.textContent=muted?'♪ OFF':'♪ ON';ui.sound.setAttribute('aria-pressed',String(!muted));if(!muted)playSound(700,.07)});
   ui.invert.addEventListener('click',()=>{invert=!invert;ui.invert.textContent='左右反転: '+(invert?'ON':'OFF');ui.invert.classList.toggle('on',invert);ui.invert.setAttribute('aria-pressed',String(invert))});
+  ui.invertY.addEventListener('click',()=>{invertY=!invertY;ui.invertY.textContent='前後反転: '+(invertY?'ON':'OFF');ui.invertY.classList.toggle('on',invertY);ui.invertY.setAttribute('aria-pressed',String(invertY))});
   document.querySelectorAll('[data-mode]').forEach(btn=>btn.addEventListener('click',()=>{
     mode=btn.dataset.mode;document.querySelectorAll('[data-mode]').forEach(el=>el.classList.toggle('active',el.dataset.mode===mode));
-    if(mode==='touch'){showSensor('タッチ操作中 · 画面を左右になぞって移動',true);paddle.target=touchX}
+    if(mode==='touch'){showSensor('タッチ操作中 · 画面を上下左右になぞって移動',true);paddle.target=touchX;paddle.targetY=touchY}
     else {sensorPermission();if(sensor.current!==null)calibrate();else showSensor('傾きセンサーの応答を待っています…')}
   }));
-  function pointerX(e){const box=canvas.getBoundingClientRect();return clamp((e.clientX-box.left)/box.width*W,0,W)}
-  canvas.addEventListener('pointerdown',e=>{e.preventDefault();pointerDown=true;try{canvas.setPointerCapture(e.pointerId)}catch(err){};if(mode==='touch'){touchX=pointerX(e);paddle.target=touchX}if(state==='ready'){if(mode==='tilt')sensorPermission();beginOrResumeDisplay();launch();acquireWakeLock()}},{passive:false});
-  canvas.addEventListener('pointermove',e=>{if(mode==='touch'&&(pointerDown||e.pointerType==='mouse')){touchX=pointerX(e);paddle.target=touchX}},{passive:true});
+  function touchTarget(e){
+    const box=canvas.getBoundingClientRect();
+    touchX=clamp((e.clientX-box.left)/box.width*W,0,W);
+    touchY=clamp((e.clientY-box.top)/box.height*H,PADDLE_Y_MIN,PADDLE_Y_MAX);
+    paddle.target=touchX;paddle.targetY=touchY;
+  }
+  canvas.addEventListener('pointerdown',e=>{e.preventDefault();pointerDown=true;try{canvas.setPointerCapture(e.pointerId)}catch(err){};if(mode==='touch')touchTarget(e);if(state==='ready'){if(mode==='tilt')sensorPermission();beginOrResumeDisplay();launch();acquireWakeLock()}},{passive:false});
+  canvas.addEventListener('pointermove',e=>{if(mode==='touch'&&(pointerDown||e.pointerType==='mouse'))touchTarget(e)},{passive:true});
   canvas.addEventListener('pointerup',()=>{pointerDown=false});canvas.addEventListener('pointercancel',()=>{pointerDown=false});
-  let arrow=0;
-  document.addEventListener('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();arrow=e.key==='ArrowLeft'?-1:1}else if(e.code==='Space'){e.preventDefault();ui.play.click()}});
-  document.addEventListener('keyup',e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight')arrow=0});
+  const arrows=new Set();
+  document.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){e.preventDefault();arrows.add(e.key)}else if(e.code==='Space'){e.preventDefault();ui.play.click()}});
+  document.addEventListener('keyup',e=>{if(e.key.startsWith('Arrow'))arrows.delete(e.key)});
+  window.addEventListener('blur',()=>arrows.clear());
   document.addEventListener('visibilitychange',()=>{
     if(document.hidden){
       if(state==='running'&&gameSessionActive){state='paused';autoPaused=true;syncUI();}
@@ -329,14 +348,24 @@
   }
   function step(dt){
     idlePulse+=dt;shake=Math.max(0,shake-dt*5);
-    // Tilt is measured relative to the position chosen as the center.
-    if(arrow){paddle.target=clamp(paddle.target+arrow*370*dt,paddle.w/2,W-paddle.w/2)}
-    else if(mode==='tilt'&&sensor.current!==null&&sensor.reference!==null&&performance.now()-sensor.lastAt<2600){
-      let diff=clamp(sensor.current-sensor.reference,-24,24);if(Math.abs(diff)<.65)diff=0;
-      paddle.target=clamp(W/2+diff*12.8*(invert?-1:1),paddle.w/2+9,W-paddle.w/2-9);
+    // Both axes use the calibrated resting attitude as their origin.
+    if(mode==='tilt'&&sensor.current!==null&&sensor.reference!==null&&performance.now()-sensor.lastAt<2600){
+      let dx=clamp(angleDiff(sensor.current.x,sensor.reference.x),-24,24);
+      let dy=clamp(angleDiff(sensor.current.y,sensor.reference.y),-22,22);
+      if(Math.abs(dx)<.65)dx=0;
+      if(Math.abs(dy)<.8)dy=0;
+      paddle.target=clamp(W/2+dx*12.8*(invert?-1:1),paddle.w/2+9,W-paddle.w/2-9);
+      paddle.targetY=clamp(PADDLE_Y_CENTER-dy*3.0*(invertY?-1:1),PADDLE_Y_MIN,PADDLE_Y_MAX);
     }
+    const arrowX=Number(arrows.has('ArrowRight'))-Number(arrows.has('ArrowLeft'));
+    const arrowY=Number(arrows.has('ArrowDown'))-Number(arrows.has('ArrowUp'));
+    if(arrowX)paddle.target=clamp(paddle.target+arrowX*370*dt,paddle.w/2,W-paddle.w/2);
+    if(arrowY)paddle.targetY=clamp(paddle.targetY+arrowY*250*dt,PADDLE_Y_MIN,PADDLE_Y_MAX);
+    const prevPaddleX=paddle.x, prevPaddleY=paddle.y;
+    const follow=1-Math.exp(-15*dt);
     const center=paddle.x+paddle.w/2;
-    paddle.x=clamp(center+(paddle.target-center)*(1-Math.exp(-15*dt))-paddle.w/2,8,W-paddle.w-8);
+    paddle.x=clamp(center+(paddle.target-center)*follow-paddle.w/2,8,W-paddle.w-8);
+    paddle.y=clamp(paddle.y+(paddle.targetY-paddle.y)*follow,PADDLE_Y_MIN,PADDLE_Y_MAX);
     if(state==='ready'&&balls[0]){balls[0].x=paddle.x+paddle.w/2;balls[0].y=paddle.y-12}
     if(state!=='running'){updateEffects(dt);return}
     for(const b of balls){
@@ -345,11 +374,21 @@
       if(b.x-b.r<12){b.x=12+b.r;b.vx=Math.abs(b.vx);playSound(255,.036,'sine',.025)}
       if(b.x+b.r>W-12){b.x=W-12-b.r;b.vx=-Math.abs(b.vx);playSound(255,.036,'sine',.025)}
       if(b.y-b.r<62){b.y=62+b.r;b.vy=Math.abs(b.vy);playSound(255,.036,'sine',.025)}
-      if(b.vy>0&&prevY+b.r<=paddle.y+7&&b.y+b.r>=paddle.y&&b.y-b.r<paddle.y+paddle.h&&b.x+b.r>=paddle.x&&b.x-b.r<=paddle.x+paddle.w){
-        const off=clamp((b.x-(paddle.x+paddle.w/2))/(paddle.w/2),-1,1);
-        const ang=off*1.12,spd=clamp(Math.hypot(b.vx,b.vy)+5,355,520);
-        b.vx=Math.sin(ang)*spd+(Math.abs(off)<.08?(Math.random()<.5?-10:10):0);b.vy=-Math.cos(ang)*spd;b.y=paddle.y-b.r-.1;
-        blast(b.x,paddle.y,'#71edf2',5);playSound(320+Math.abs(off)*170,.06,'triangle',.04);
+      // Continuous top-face collision against the paddle moving on BOTH axes.
+      // Use relative displacement to detect crossing even when the paddle moves up/down.
+      const relativeOld=prevY+b.r-prevPaddleY;
+      const relativeNew=b.y+b.r-paddle.y;
+      if(b.vy>0&&relativeOld<=0&&relativeNew>=0&&relativeNew>relativeOld){
+        const t=clamp(-relativeOld/(relativeNew-relativeOld),0,1);
+        const hitX=prevX+(b.x-prevX)*t;
+        const hitLeft=prevPaddleX+(paddle.x-prevPaddleX)*t;
+        if(hitX+b.r>=hitLeft&&hitX-b.r<=hitLeft+paddle.w){
+          const off=clamp((hitX-(hitLeft+paddle.w/2))/(paddle.w/2),-1,1);
+          const ang=off*1.12,spd=clamp(Math.hypot(b.vx,b.vy)+5,355,520);
+          b.vx=Math.sin(ang)*spd+(Math.abs(off)<.08?(Math.random()<.5?-10:10):0);b.vy=-Math.cos(ang)*spd;
+          b.y=paddle.y-b.r-.1;
+          blast(hitX,paddle.y,'#71edf2',5);playSound(320+Math.abs(off)*170,.06,'triangle',.04);
+        }
       }
       for(const brick of bricks){if(!brick.alive)continue;
         if(brickCollision(b,brick,prevX,prevY)){
@@ -360,8 +399,15 @@
     }
     balls=balls.filter(b=>!b.dead);
     bricks=bricks.filter(b=>b.alive);
-    for(let i=items.length-1;i>=0;i--){const item=items[i];item.y+=item.vy*dt;item.pulse+=dt*4;
-      if(item.y+item.r>paddle.y&&item.y-item.r<paddle.y+paddle.h+5&&item.x+item.r>paddle.x&&item.x-item.r<paddle.x+paddle.w){getItem(item);items.splice(i,1)}
+    for(let i=items.length-1;i>=0;i--){const item=items[i],prevItemY=item.y;item.y+=item.vy*dt;item.pulse+=dt*4;
+      const overlap=item.y+item.r>=paddle.y&&item.y-item.r<=paddle.y+paddle.h&&item.x+item.r>=paddle.x&&item.x-item.r<=paddle.x+paddle.w;
+      const d0=prevItemY+item.r-prevPaddleY,d1=item.y+item.r-paddle.y;
+      let crossed=false;
+      if(d0<=0&&d1>=0&&d1>d0){
+        const t=clamp(-d0/(d1-d0),0,1), px=prevPaddleX+(paddle.x-prevPaddleX)*t;
+        crossed=item.x+item.r>=px&&item.x-item.r<=px+paddle.w;
+      }
+      if(overlap||crossed){getItem(item);items.splice(i,1)}
       else if(item.y>H+20)items.splice(i,1);
     }
     updateEffects(dt);
@@ -380,7 +426,11 @@
     ctx.strokeStyle='#315074';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(15,53);ctx.lineTo(W-15,53);ctx.stroke();
     // Side rails and floor markers
     ctx.strokeStyle='#3c679144';ctx.lineWidth=2;ctx.strokeRect(11,62,W-22,H-91);
-    for(let i=0;i<4;i++){ctx.strokeStyle='#3579a42d';ctx.beginPath();ctx.moveTo(20,616+i*20);ctx.lineTo(W-20,616+i*20);ctx.stroke()}
+    // Show the bottom 20% as the paddle movement zone.
+    ctx.fillStyle='#24c7eb0a';ctx.fillRect(12,PADDLE_ZONE_TOP,W-24,H-PADDLE_ZONE_TOP-12);
+    ctx.strokeStyle='#47bce168';ctx.setLineDash([6,7]);ctx.beginPath();ctx.moveTo(14,PADDLE_ZONE_TOP);ctx.lineTo(W-14,PADDLE_ZONE_TOP);ctx.stroke();ctx.setLineDash([]);
+    ctx.font='700 10px system-ui';ctx.fillStyle='#7fb6ca99';ctx.fillText('PADDLE MOVE ZONE · BOTTOM 20%',21,PADDLE_ZONE_TOP+17);
+    for(let i=0;i<4;i++){ctx.strokeStyle='#3579a42d';ctx.beginPath();ctx.moveTo(20,PADDLE_ZONE_TOP+24+i*24);ctx.lineTo(W-20,PADDLE_ZONE_TOP+24+i*24);ctx.stroke()}
     for(const brick of bricks){const {x,y,w,h,color}=brick;ctx.shadowColor=color;ctx.shadowBlur=9;ctx.fillStyle=color;rounded(x,y,w,h,6);ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='#ffffff46';rounded(x+2,y+2,w-4,5,2);ctx.fill();ctx.fillStyle='#0b15342f';rounded(x+3,y+h-7,w-6,4,2);ctx.fill()}
     ctx.save();ctx.shadowBlur=shake>0?20:14;ctx.shadowColor='#5ceff6';ctx.fillStyle='#2ce7ee';rounded(paddle.x,paddle.y,paddle.w,paddle.h,8);ctx.fill();ctx.shadowBlur=0;
     ctx.fillStyle='#caffff';rounded(paddle.x+7,paddle.y+2,paddle.w-14,4,2);ctx.fill();ctx.fillStyle='#075e80';rounded(paddle.x+paddle.w/2-9,paddle.y+5,18,6,3);ctx.fill();ctx.restore();
