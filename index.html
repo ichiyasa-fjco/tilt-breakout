@@ -53,6 +53,10 @@
   .micro.on{color:#78f2fb;border-color:#518f9b}
   .legend{display:flex;justify-content:center;flex-wrap:wrap;gap:12px 18px;color:#a5b6cd;font-size:11px;line-height:1.5}
   .token{font-weight:900;margin-right:3px}.token.a{color:#8e92ff}.token.b{color:#ffd16e}
+  .displayControl{display:flex;align-items:center;justify-content:center;gap:9px;flex-wrap:wrap;min-height:21px;text-align:center}
+  .displayStatus{font-size:11px;line-height:1.5;color:#8edbc5}
+  .displayStatus.warn{color:#ffd49a}
+  .displayControl button[hidden]{display:none}
   .notice{font-size:11px;text-align:center;color:#8194b3;line-height:1.5;margin:0}
   @media (prefers-reduced-motion:reduce){.overlay{transition:none}}
 </style>
@@ -77,8 +81,9 @@
     <div class="controlHead"><span class="caption">操作方法</span><div class="modes"><button class="mode active" data-mode="tilt" type="button">◈ 傾き操作</button><button class="mode" data-mode="touch" type="button">☝ タッチ操作</button></div></div>
     <div class="footControls"><div class="sensor"><span class="dot" id="sensorDot"></span><span id="sensorText" role="status">センサー待機中 · 開始時に有効化</span></div><div class="config"><button class="micro" id="invertBtn" type="button" aria-pressed="false">左右反転: OFF</button></div></div>
   </section>
+  <div class="displayControl"><span class="displayStatus" id="displayStatus" role="status">ゲーム開始時に縦画面固定・画面消灯防止を設定します</span><button class="micro" id="displayBtn" type="button" hidden>⛶ 画面を再設定</button></div>
   <div class="legend"><span><span class="token a">×3</span>ボールが3つに分裂</span><span><span class="token b">+1</span>残りボールが1増加</span><span>アイテムはバーでキャッチ</span></div>
-  <p class="notice">傾きが動かない場合は「中心を設定」をタップ。センサーが使えないときは「タッチ操作」に切り替えられます。</p>
+  <p class="notice">傾きが動かない場合は「中心を設定」をタップ。全画面を解除すると縦画面固定も解除されるため、再開時に再設定されます。</p>
 </main>
 <script>
 (() => {
@@ -86,7 +91,7 @@
   const W=480,H=720, TAU=Math.PI*2, R=8;
   const $ = id => document.getElementById(id);
   const canvas=$('game'), ctx=canvas.getContext('2d',{alpha:false});
-  const ui={score:$('score'),best:$('best'),lives:$('lives'),overlay:$('overlay'),kicker:$('overlayKicker'),title:$('overlayTitle'),overlayText:$('overlayText'),play:$('playBtn'),cal:$('calBtn'),sound:$('soundBtn'),restart:$('restartBtn'),sensorText:$('sensorText'),sensorDot:$('sensorDot'),invert:$('invertBtn'),stage:$('stage')};
+  const ui={score:$('score'),best:$('best'),lives:$('lives'),overlay:$('overlay'),kicker:$('overlayKicker'),title:$('overlayTitle'),overlayText:$('overlayText'),play:$('playBtn'),cal:$('calBtn'),sound:$('soundBtn'),restart:$('restartBtn'),sensorText:$('sensorText'),sensorDot:$('sensorDot'),invert:$('invertBtn'),stage:$('stage'),displayStatus:$('displayStatus'),displayBtn:$('displayBtn')};
   const palette=['#f19bfd','#c69dff','#869dfb','#61c8fa','#51e3cf','#ffe08c','#ff9e9e'];
   let state='ready', score=0, lives=3, best=0, mode='tilt', invert=false, muted=false;
   let balls=[],bricks=[],items=[],sparks=[],stars=[],floatTexts=[];
@@ -94,6 +99,107 @@
   let sensor={current:null,reference:null,lastAt:0,readings:0,requested:false,denied:false};
   let touchX=W/2, pointerDown=false, idlePulse=0, shake=0, soundCtx=null, lastTime=0, accum=0;
   let nextSpark=0;
+  // The screen stays awake during a session. Manual pause releases it;
+  // an automatic pause on tab switch may re-acquire it on return.
+  let gameSessionActive=false, autoPaused=false;
+  let wakeSentinel=null, wakeRequest=null, wakeEpoch=0, wakeFailure='';
+  let portraitStatus='idle', portraitFailure='', portraitRequest=null;
+  function wantsWakeLock(){
+    return gameSessionActive && !document.hidden &&
+      (state==='running'||state==='ready'||(state==='paused'&&autoPaused));
+  }
+  function updateDisplayStatus(){
+    if(!gameSessionActive){
+      ui.displayStatus.textContent='ゲーム開始時に縦画面固定・画面消灯防止を設定します';
+      ui.displayStatus.classList.remove('warn');ui.displayBtn.hidden=true;return;
+    }
+    const portraitOn=!!document.fullscreenElement && portraitStatus==='locked';
+    const awake=!!wakeSentinel && !wakeSentinel.released;
+    let orientationText=portraitOn?'縦画面固定 ON':portraitStatus==='pending'?'縦画面設定中…':'縦画面固定 OFF';
+    let awakeText=awake?'画面消灯防止 ON':wakeRequest?'画面消灯防止設定中…':
+      state==='paused'&&!autoPaused?'一時停止中（消灯防止 OFF）':document.hidden?'画面非表示中':
+      '画面消灯防止 OFF';
+    const warn=(portraitStatus==='failed'||!!wakeFailure);
+    let detail='';
+    if(portraitStatus==='failed')detail=' ／ 失敗時は端末の自動回転をOFFに';
+    if(wakeFailure)detail+=' ／ 画面消灯防止に失敗';
+    ui.displayStatus.textContent=orientationText+' ／ '+awakeText+detail;
+    ui.displayStatus.classList.toggle('warn',warn);
+    ui.displayBtn.hidden=portraitOn && (awake || !wantsWakeLock()) && !wakeFailure;
+  }
+  function releaseWakeLock(){
+    // An outstanding request is invalidated so it cannot acquire a stale lock.
+    wakeEpoch++;
+    // Let a new foreground request proceed even if the old promise is pending.
+    wakeRequest=null;
+    const held=wakeSentinel;wakeSentinel=null;
+    if(held&&!held.released)held.release().catch(e=>console.warn('Wake Lock release:',e));
+    updateDisplayStatus();
+  }
+  function acquireWakeLock(){
+    if(!wantsWakeLock())return;
+    if(wakeSentinel&&!wakeSentinel.released)return;
+    if(wakeRequest)return wakeRequest;
+    if(!navigator.wakeLock?.request){wakeFailure='非対応';updateDisplayStatus();return;}
+    const epoch=wakeEpoch;
+    wakeFailure='';
+    const pending=navigator.wakeLock.request('screen').then(sentinel=>{
+      if(epoch!==wakeEpoch||!wantsWakeLock()){
+        sentinel.release().catch(()=>{});return;
+      }
+      wakeSentinel=sentinel;
+      sentinel.addEventListener('release',()=>{
+        if(wakeSentinel===sentinel)wakeSentinel=null;
+        updateDisplayStatus();
+      });
+    }).catch(e=>{if(epoch===wakeEpoch){wakeFailure=e?.name||'失敗';console.warn('Wake Lock request:',e);}});
+    wakeRequest=pending;
+    pending.finally(()=>{if(wakeRequest===pending)wakeRequest=null;updateDisplayStatus();});
+    updateDisplayStatus();
+    return pending;
+  }
+  function enterPortraitFullscreen(){
+    // Call from the user's button/touch event, before any awaited operation:
+    // requestFullscreen() needs transient user activation.
+    if(!gameSessionActive||document.hidden)return;
+    if(portraitRequest)return portraitRequest;
+    portraitStatus='pending';portraitFailure='';updateDisplayStatus();
+    const pending=(async()=>{
+      try{
+        if(!document.fullscreenElement){
+          if(!document.documentElement.requestFullscreen)throw new Error('Fullscreen非対応');
+          await document.documentElement.requestFullscreen();
+        }
+        if(!gameSessionActive)return;
+        if(!screen.orientation?.lock)throw new Error('Orientation Lock非対応');
+        await screen.orientation.lock('portrait-primary');
+        if(!gameSessionActive){try{screen.orientation.unlock()}catch(e){};return;}
+        portraitStatus='locked';
+      }catch(e){
+        if(gameSessionActive){portraitStatus='failed';portraitFailure=e?.name||String(e);console.warn('Portrait lock:',e);}
+      }finally{updateDisplayStatus();}
+    })();
+    portraitRequest=pending;
+    pending.finally(()=>{if(portraitRequest===pending)portraitRequest=null;updateDisplayStatus();});
+    return pending;
+  }
+  function endDisplaySession(){
+    gameSessionActive=false;autoPaused=false;
+    releaseWakeLock();
+    portraitStatus='idle';portraitFailure='';
+    try{screen.orientation?.unlock?.()}catch(e){console.warn('Orientation unlock:',e)}
+    if(document.fullscreenElement&&document.exitFullscreen){
+      document.exitFullscreen().catch(e=>console.warn('Exit fullscreen:',e));
+    }
+    updateDisplayStatus();
+  }
+  function beginOrResumeDisplay(){
+    gameSessionActive=true;autoPaused=false;
+    // Fullscreen begins synchronously with a user gesture; orientation lock
+    // runs after fullscreen is entered. The game can continue on API failure.
+    enterPortraitFullscreen();
+    acquireWakeLock();
+  }
   try {best=Number(localStorage.getItem('tilt-breaker-best')||0)||0;}catch(e){}
   ui.best.textContent=best.toLocaleString('ja-JP');
   function rnd(a,b){return a+Math.random()*(b-a)}
@@ -148,13 +254,19 @@
   }
   ui.cal.addEventListener('click',calibrate);
   ui.play.addEventListener('click',()=>{
-    if(state==='over'||state==='win'){newGame();sensorPermission();launch()}
-    else if(state==='ready'){sensorPermission();launch()}
-    else if(state==='running'){state='paused';syncUI()}
-    else if(state==='paused'){state='running';syncUI()}
-    if(!sensor.requested&&mode==='tilt')sensorPermission();
+    if(state==='running'){
+      state='paused';autoPaused=false;syncUI();releaseWakeLock();return;
+    }
+    // Get sensor permission directly in the tap handler, before fullscreen.
+    if(mode==='tilt')sensorPermission();
+    if(state==='over'||state==='win')newGame();
+    beginOrResumeDisplay();
+    if(state==='ready')launch();
+    else if(state==='paused'){state='running';syncUI();}
+    acquireWakeLock();
   });
-  ui.restart.addEventListener('click',()=>{newGame();playSound(320,.11,'triangle')});
+  ui.restart.addEventListener('click',()=>{endDisplaySession();newGame();playSound(320,.11,'triangle')});
+  ui.displayBtn.addEventListener('click',()=>{if(!gameSessionActive)return;enterPortraitFullscreen();acquireWakeLock();});
   ui.sound.addEventListener('click',()=>{muted=!muted;ui.sound.textContent=muted?'♪ OFF':'♪ ON';ui.sound.setAttribute('aria-pressed',String(!muted));if(!muted)playSound(700,.07)});
   ui.invert.addEventListener('click',()=>{invert=!invert;ui.invert.textContent='左右反転: '+(invert?'ON':'OFF');ui.invert.classList.toggle('on',invert);ui.invert.setAttribute('aria-pressed',String(invert))});
   document.querySelectorAll('[data-mode]').forEach(btn=>btn.addEventListener('click',()=>{
@@ -163,13 +275,35 @@
     else {sensorPermission();if(sensor.current!==null)calibrate();else showSensor('傾きセンサーの応答を待っています…')}
   }));
   function pointerX(e){const box=canvas.getBoundingClientRect();return clamp((e.clientX-box.left)/box.width*W,0,W)}
-  canvas.addEventListener('pointerdown',e=>{e.preventDefault();pointerDown=true;try{canvas.setPointerCapture(e.pointerId)}catch(err){};if(mode==='touch'){touchX=pointerX(e);paddle.target=touchX}if(state==='ready'){sensorPermission();launch()}},{passive:false});
+  canvas.addEventListener('pointerdown',e=>{e.preventDefault();pointerDown=true;try{canvas.setPointerCapture(e.pointerId)}catch(err){};if(mode==='touch'){touchX=pointerX(e);paddle.target=touchX}if(state==='ready'){if(mode==='tilt')sensorPermission();beginOrResumeDisplay();launch();acquireWakeLock()}},{passive:false});
   canvas.addEventListener('pointermove',e=>{if(mode==='touch'&&(pointerDown||e.pointerType==='mouse')){touchX=pointerX(e);paddle.target=touchX}},{passive:true});
   canvas.addEventListener('pointerup',()=>{pointerDown=false});canvas.addEventListener('pointercancel',()=>{pointerDown=false});
   let arrow=0;
   document.addEventListener('keydown',e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();arrow=e.key==='ArrowLeft'?-1:1}else if(e.code==='Space'){e.preventDefault();ui.play.click()}});
   document.addEventListener('keyup',e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight')arrow=0});
-  document.addEventListener('visibilitychange',()=>{if(document.hidden&&state==='running'){state='paused';syncUI()}});
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden){
+      if(state==='running'&&gameSessionActive){state='paused';autoPaused=true;syncUI();}
+      releaseWakeLock();
+    }else if(wantsWakeLock()){
+      // A visibility change commonly releases wake locks automatically.
+      // Do not automatically restart the ball after a background pause.
+      acquireWakeLock();
+    }
+    updateDisplayStatus();
+  });
+  document.addEventListener('fullscreenchange',()=>{
+    if(!document.fullscreenElement){
+      portraitStatus=gameSessionActive?'failed':'idle';
+      if(gameSessionActive&&state==='running'){
+        state='paused';autoPaused=true;syncUI();
+      }
+      // Esc / system back can exit fullscreen; resuming or the retry button
+      // will request it again with a fresh user gesture.
+      if(gameSessionActive&&!document.hidden)releaseWakeLock();
+    }
+    updateDisplayStatus();
+  });
   function blast(x,y,color,n=9){for(let i=0;i<n;i++){const a=rnd(0,TAU),s=rnd(35,160),life=rnd(.27,.6);sparks.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life,max:life,color})}if(sparks.length>180)sparks.splice(0,sparks.length-180)}
   function textPopup(x,y,text,color){floatTexts.push({x,y,text,color,life:.9})}
   function dropItem(brick){if(Math.random()>=.20)return;items.push({x:brick.x+brick.w/2,y:brick.y+brick.h/2,vy:135,r:15,kind:Math.random()<.5?'split':'life',pulse:rnd(0,TAU)})}
@@ -231,8 +365,8 @@
       else if(item.y>H+20)items.splice(i,1);
     }
     updateEffects(dt);
-    if(bricks.length===0){state='win';syncUI();playSound(1050,.33,'triangle',.09);return}
-    if(balls.length===0){lives--;updateHud();items=[];if(lives>0){resetBall();playSound(240,.2,'sawtooth',.04)}else{state='over';syncUI();playSound(170,.32,'sawtooth',.065)}}
+    if(bricks.length===0){state='win';syncUI();endDisplaySession();playSound(1050,.33,'triangle',.09);return}
+    if(balls.length===0){lives--;updateHud();items=[];if(lives>0){resetBall();playSound(240,.2,'sawtooth',.04)}else{state='over';syncUI();endDisplaySession();playSound(170,.32,'sawtooth',.065)}}
   }
   function updateEffects(dt){for(const p of sparks){p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=130*dt;p.life-=dt}sparks=sparks.filter(p=>p.life>0);for(const t of floatTexts){t.y-=40*dt;t.life-=dt}floatTexts=floatTexts.filter(t=>t.life>0)}
   function rounded(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r)}
@@ -257,7 +391,7 @@
     ctx.restore();
   }
   function loop(now){if(!lastTime)lastTime=now;let delta=Math.min((now-lastTime)/1000,.05);lastTime=now;accum+=delta;const stepMs=1/120;let n=0;while(accum>=stepMs&&n<7){step(stepMs);accum-=stepMs;n++}if(n>=7)accum=0;frame();requestAnimationFrame(loop)}
-  newGame();requestAnimationFrame(loop);
+  newGame();updateDisplayStatus();requestAnimationFrame(loop);
   // Helpful status if no secure-context sensor data ever arrives.
   setInterval(()=>{if(mode!=='tilt'||state==='over'||state==='win')return;
     if(sensor.readings===0&&sensor.requested){showSensor(window.isSecureContext?'センサーが未検出 · タッチ操作も利用可能':'HTTPSで開くと傾き操作を利用できます',false,true)}
