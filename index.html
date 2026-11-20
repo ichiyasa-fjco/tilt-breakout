@@ -106,14 +106,14 @@
   const ui={score:$('score'),best:$('best'),lives:$('lives'),overlay:$('overlay'),kicker:$('overlayKicker'),title:$('overlayTitle'),overlayText:$('overlayText'),play:$('playBtn'),cal:$('calBtn'),sound:$('soundBtn'),restart:$('restartBtn'),sensorText:$('sensorText'),sensorDot:$('sensorDot'),invert:$('invertBtn'),invertY:$('invertYBtn'),sensitivityX:$('sensitivityX'),sensitivityY:$('sensitivityY'),stage:$('stage'),displayStatus:$('displayStatus'),displayBtn:$('displayBtn')};
   // A single reinforced block above five complete rows of seven blocks.
   const BRICK_COLS=7,BRICK_ROWS=5,TOTAL_BRICKS=1+BRICK_COLS*BRICK_ROWS;
-  const SPECIAL_HITS=5;
+  const SPECIAL_HITS=3;
   // Simulation coordinates are in virtual pixels. At the highest paddle
   // position, a nearly vertical 355 px/s return can just reach the underside
   // of the reinforced brick (gravity limits its ascent to roughly 435 px).
   const GRAVITY=145, PADDLE_LAUNCH_SPEED=355;
   const palette=['#eeeeee','#d2d2d2','#b6b6b6','#999999','#7d7d7d'];
   // Index is the number of hits already received by the strong block.
-  const damagedRed=['#eeeeee','#f0bdbd','#ef9797','#e76363','#d92836'];
+  const damagedRed=['#eeeeee','#f09b9b','#d92836'];
   // The existing 'medium' gain is preserved for both axes.
   const tiltGain={x:{low:8,medium:12.8,high:19},y:{low:1.8,medium:3.0,high:4.6}};
   let sensitivityX='medium',sensitivityY='medium';
@@ -446,10 +446,20 @@
           // speed. Otherwise gravity would make each return faster and allow
           // the top brick to be reached from anywhere on the paddle's track.
           const ang=off*.92;
-          b.vx=Math.sin(ang)*PADDLE_LAUNCH_SPEED+(Math.abs(off)<.08?(Math.random()<.5?-10:10):0);
-          b.vy=-Math.cos(ang)*PADDLE_LAUNCH_SPEED;
+          // A genuinely upward-moving paddle gives the ball 1.8x its normal
+          // launch speed. Check movement across this physics step, not merely
+          // whether the paddle is positioned high in its movement zone.
+          // The small dead zone prevents accelerometer jitter from triggering it.
+          const paddleUpSpeed=(prevPaddleY-paddle.y)/dt;
+          const boost=paddleUpSpeed>8?1.8:1;
+          const normalVx=Math.sin(ang)*PADDLE_LAUNCH_SPEED+(Math.abs(off)<.08?(Math.random()<.5?-10:10):0);
+          const normalVy=-Math.cos(ang)*PADDLE_LAUNCH_SPEED;
+          b.vx=normalVx*boost;
+          b.vy=normalVy*boost;
           b.y=paddle.y-b.r-.1;
-          blast(hitX,paddle.y,'#71edf2',5);playSound(320+Math.abs(off)*170,.06,'triangle',.04);
+          if(boost>1){textPopup(hitX,paddle.y-28,'BOOST ×1.8','#a5ffe2')}
+          blast(hitX,paddle.y,boost>1?'#a5ffe2':'#71edf2',boost>1?10:5);
+          playSound(boost>1?680:320+Math.abs(off)*170,.06,'triangle',.04);
         }
       }
       for(const brick of bricks){if(!brick.alive)continue;
