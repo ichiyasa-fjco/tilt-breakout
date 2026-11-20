@@ -79,7 +79,7 @@
   </div>
   <div class="stage" id="stage">
     <canvas id="game" aria-label="ブロック崩しのプレイ画面"></canvas>
-    <div class="overlay" id="overlay"><div class="kicker" id="overlayKicker">TILT CONTROL</div><h1 id="overlayTitle">BREAK OUT!</h1><p class="hint" id="overlayText">タブレットを傾けてバーを操作。<br>下部20%のバーを上側に寄せると、高いブロックまで届きやすくなります。</p></div>
+    <div class="overlay" id="overlay"><div class="kicker" id="overlayKicker">TILT CONTROL</div><h1 id="overlayTitle">BREAK OUT!</h1><p class="hint" id="overlayText">タブレットを傾けてバーを操作。<br>下部20%の移動範囲の上側30%で、上昇中のバーからブーストして最上段を狙おう。</p></div>
   </div>
   <div class="actions"><button class="primary" id="playBtn" type="button">▶ ゲーム開始</button><button class="secondary" id="calBtn" type="button">◎ 中心を設定</button></div>
   <section class="controls" aria-label="ゲーム操作設定">
@@ -92,7 +92,7 @@
   </section>
   <div class="displayControl"><span class="displayStatus" id="displayStatus" role="status">ゲーム開始時に縦画面固定・画面消灯防止を設定します</span><button class="micro" id="displayBtn" type="button" hidden>⛶ 画面を再設定</button></div>
   <div class="legend"><span><span class="token a">×3</span>ボールが3つに分裂</span><span><span class="token b">+1</span>残りボールが1増加</span><span>アイテムはバーでキャッチ</span></div>
-  <p class="notice">ボールには下向きの重力が働きます。最上段を狙うときはバーを移動範囲の上側へ。左右・前後の中心姿勢は「中心を設定」で調整できます。</p>
+  <p class="notice">ボールにはブースト中も重力が働きます。最上段を狙うときは、バー移動範囲の上30%から、なるべく垂直にブースト打ち返し！</p>
 </main>
 <script>
 (() => {
@@ -107,10 +107,17 @@
   // A single reinforced block above five complete rows of seven blocks.
   const BRICK_COLS=7,BRICK_ROWS=5,TOTAL_BRICKS=1+BRICK_COLS*BRICK_ROWS;
   const SPECIAL_HITS=3;
-  // Simulation coordinates are in virtual pixels. At the highest paddle
-  // position, a nearly vertical 355 px/s return can just reach the underside
-  // of the reinforced brick (gravity limits its ascent to roughly 435 px).
+  // Virtual-pixel physics: constant downward gravity acts on EVERY ball,
+  // including a boosted one. The normal return remains unchanged so that
+  // non-boosted shots can still break the lower rows.
   const GRAVITY=145, PADDLE_LAUNCH_SPEED=355;
+  const BOOST_MULTIPLIER=1.5;
+  // Boosted balls also feel stronger upward speed-dependent resistance.
+  // This is calibrated so a near-vertical boost reaches the lone top brick
+  // only if the paddle is in roughly the upper 30% of its vertical travel.
+  // Gravity itself is NOT switched off or changed during a boost.
+  const BOOST_ASCENT_DRAG=0.001456;
+  const BOOST_REACH_ZONE_END=PADDLE_Y_MIN+(PADDLE_Y_MAX-PADDLE_Y_MIN)*0.30;
   const palette=['#eeeeee','#d2d2d2','#b6b6b6','#999999','#7d7d7d'];
   // Index is the number of hits already received by the strong block.
   const damagedRed=['#eeeeee','#f09b9b','#d92836'];
@@ -269,12 +276,12 @@
   function brickDisplayColor(brick){
     return brick.special?damagedRed[clamp(SPECIAL_HITS-brick.hp,0,SPECIAL_HITS-1)]:brick.color;
   }
-  function newBall(x,y,vx,vy){return {x,y,vx,vy,r:R,trail:[],dead:false}}
+  function newBall(x,y,vx,vy,boosted=false){return {x,y,vx,vy,r:R,trail:[],dead:false,boosted}}
   function resetBall(){balls=[newBall(paddle.x+paddle.w/2,paddle.y-11,0,0)];state='ready';syncUI()}
   function newGame(){score=0;lives=3;items=[];sparks=[];floatTexts=[];shake=0;paddle.x=W/2-paddle.w/2;paddle.y=PADDLE_Y_CENTER;paddle.target=W/2;paddle.targetY=PADDLE_Y_CENTER;touchX=W/2;touchY=PADDLE_Y_CENTER;spawnBricks();resetBall();updateHud()}
   function syncUI(){const o=ui.overlay;
     if(state==='running'){o.classList.add('hidden');ui.play.textContent='Ⅱ 一時停止'}
-    if(state==='ready'){o.classList.remove('hidden');ui.kicker.textContent=score?'NEXT BALL':'TILT CONTROL';ui.title.textContent=score?'READY?':'BREAK OUT!';ui.overlayText.innerHTML=score?'準備ができたらボールを発射！':'タブレットを傾けてバーを操作。<br>下部20%のバーを上側に寄せると、高いブロックまで届きやすくなります。';ui.play.textContent=score?'▶ ボールを発射':'▶ ゲーム開始'}
+    if(state==='ready'){o.classList.remove('hidden');ui.kicker.textContent=score?'NEXT BALL':'TILT CONTROL';ui.title.textContent=score?'READY?':'BREAK OUT!';ui.overlayText.innerHTML=score?'準備ができたらボールを発射！':'タブレットを傾けてバーを操作。<br>下部20%の移動範囲の上側30%で、上昇中のバーからブーストして最上段を狙おう。';ui.play.textContent=score?'▶ ボールを発射':'▶ ゲーム開始'}
     if(state==='paused'){o.classList.remove('hidden');ui.kicker.textContent='PAUSE';ui.title.textContent='一時停止';ui.overlayText.textContent='再開ボタンでゲームに戻れます';ui.play.textContent='▶ 再開'}
     if(state==='over'){o.classList.remove('hidden');ui.kicker.textContent='GAME OVER';ui.title.textContent='GAME OVER';ui.overlayText.textContent=`最終スコア ${score.toLocaleString('ja-JP')} 点`;ui.play.textContent='↻ もう一度遊ぶ'}
     if(state==='win'){o.classList.remove('hidden');ui.kicker.textContent='CLEAR!';ui.title.textContent='STAGE CLEAR';ui.overlayText.textContent=`すべてのブロックを破壊！ ${score.toLocaleString('ja-JP')} 点`;ui.play.textContent='↻ もう一度遊ぶ'}
@@ -382,7 +389,7 @@
   function triplicate(){if(!balls.length)return;const base=balls[Math.floor(Math.random()*balls.length)],v=Math.hypot(base.vx,base.vy)||355,a=Math.atan2(base.vy,base.vx),offset=.40;
     // One currently moving ball becomes three total: the original plus two copies.
     base.vx=Math.cos(a)*v;base.vy=Math.sin(a)*v;
-    for(const da of [-offset,offset])balls.push(newBall(base.x+Math.cos(a+da)*4,base.y+Math.sin(a+da)*4,Math.cos(a+da)*v,Math.sin(a+da)*v));
+    for(const da of [-offset,offset])balls.push(newBall(base.x+Math.cos(a+da)*4,base.y+Math.sin(a+da)*4,Math.cos(a+da)*v,Math.sin(a+da)*v,base.boosted));
     blast(base.x,base.y,'#9994ff',28);textPopup(base.x,base.y-32,'MULTI ×3','#c3b8ff');playSound(850,.23,'triangle',.08);
   }
   function getItem(item){if(item.kind==='life'){lives++;updateHud();textPopup(item.x,item.y-15,'+1 BALL','#ffd87b');blast(item.x,item.y,'#ffd278',20);playSound(950,.20,'sine',.065)}else triplicate()}
@@ -423,11 +430,14 @@
     if(state!=='running'){updateEffects(dt);return}
     for(const b of balls){
       const prevX=b.x,prevY=b.y;
-      // Constant downward gravitational acceleration: upward motion slows,
-      // pauses at its apex, then accelerates back toward the paddle.
+      // Downward gravity ALWAYS applies. An upward-moving boost gets extra
+      // speed-dependent resistance to limit its apex without crippling
+      // ordinary shots; after the apex the ball accelerates downward.
+      const effectiveAcceleration=GRAVITY+
+        (b.boosted&&b.vy<0?BOOST_ASCENT_DRAG*b.vy*b.vy:0);
       b.x+=b.vx*dt;
-      b.y+=b.vy*dt+0.5*GRAVITY*dt*dt;
-      b.vy+=GRAVITY*dt;
+      b.y+=b.vy*dt+0.5*effectiveAcceleration*dt*dt;
+      b.vy+=effectiveAcceleration*dt;
       b.trail.push({x:b.x,y:b.y});if(b.trail.length>6)b.trail.shift();
       if(b.x-b.r<12){b.x=12+b.r;b.vx=Math.abs(b.vx);playSound(255,.036,'sine',.025)}
       if(b.x+b.r>W-12){b.x=W-12-b.r;b.vx=-Math.abs(b.vx);playSound(255,.036,'sine',.025)}
@@ -446,18 +456,18 @@
           // speed. Otherwise gravity would make each return faster and allow
           // the top brick to be reached from anywhere on the paddle's track.
           const ang=off*.92;
-          // A genuinely upward-moving paddle gives the ball 1.8x its normal
-          // launch speed. Check movement across this physics step, not merely
-          // whether the paddle is positioned high in its movement zone.
-          // The small dead zone prevents accelerometer jitter from triggering it.
+          // A genuinely upward-moving paddle gives the ball 1.5x initial
+          // speed. The same constant downward gravity still applies.
+          // Check actual motion in this physics step, not just paddle height.
           const paddleUpSpeed=(prevPaddleY-paddle.y)/dt;
-          const boost=paddleUpSpeed>8?1.8:1;
+          const boost=paddleUpSpeed>8?BOOST_MULTIPLIER:1;
           const normalVx=Math.sin(ang)*PADDLE_LAUNCH_SPEED+(Math.abs(off)<.08?(Math.random()<.5?-10:10):0);
           const normalVy=-Math.cos(ang)*PADDLE_LAUNCH_SPEED;
           b.vx=normalVx*boost;
           b.vy=normalVy*boost;
+          b.boosted=boost>1;
           b.y=paddle.y-b.r-.1;
-          if(boost>1){textPopup(hitX,paddle.y-28,'BOOST ×1.8','#a5ffe2')}
+          if(boost>1){textPopup(hitX,paddle.y-28,'BOOST ×1.5','#a5ffe2')}
           blast(hitX,paddle.y,boost>1?'#a5ffe2':'#71edf2',boost>1?10:5);
           playSound(boost>1?680:320+Math.abs(off)*170,.06,'triangle',.04);
         }
@@ -512,10 +522,14 @@
     ctx.strokeStyle='#315074';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(15,53);ctx.lineTo(W-15,53);ctx.stroke();
     // Side rails and floor markers
     ctx.strokeStyle='#3c679144';ctx.lineWidth=2;ctx.strokeRect(11,62,W-22,H-91);
-    // Show the bottom 20% as the paddle movement zone.
+    // Highlight the upper 30% of the paddle's available vertical travel.
+    // Nearly vertical boosted returns from this region can reach the top brick.
     ctx.fillStyle='#24c7eb0a';ctx.fillRect(12,PADDLE_ZONE_TOP,W-24,H-PADDLE_ZONE_TOP-12);
+    ctx.fillStyle='#46e8b91b';ctx.fillRect(12,PADDLE_Y_MIN,W-24,BOOST_REACH_ZONE_END-PADDLE_Y_MIN);
     ctx.strokeStyle='#47bce168';ctx.setLineDash([6,7]);ctx.beginPath();ctx.moveTo(14,PADDLE_ZONE_TOP);ctx.lineTo(W-14,PADDLE_ZONE_TOP);ctx.stroke();ctx.setLineDash([]);
+    ctx.strokeStyle='#77e3c498';ctx.setLineDash([3,5]);ctx.beginPath();ctx.moveTo(14,BOOST_REACH_ZONE_END);ctx.lineTo(W-14,BOOST_REACH_ZONE_END);ctx.stroke();ctx.setLineDash([]);
     ctx.font='700 10px system-ui';ctx.fillStyle='#7fb6ca99';ctx.fillText('PADDLE MOVE ZONE · BOTTOM 20%',21,PADDLE_ZONE_TOP+17);
+    ctx.font='700 10px system-ui';ctx.fillStyle='#a4f2d7c9';ctx.fillText('BOOST REACH · TOP 30%',21,BOOST_REACH_ZONE_END-6);
     for(let i=0;i<4;i++){ctx.strokeStyle='#3579a42d';ctx.beginPath();ctx.moveTo(20,PADDLE_ZONE_TOP+24+i*24);ctx.lineTo(W-20,PADDLE_ZONE_TOP+24+i*24);ctx.stroke()}
     for(const brick of bricks){
       const {x,y,w,h}=brick,color=brickDisplayColor(brick);
