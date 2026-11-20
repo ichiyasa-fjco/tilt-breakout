@@ -92,7 +92,7 @@
   </section>
   <div class="displayControl"><span class="displayStatus" id="displayStatus" role="status">ゲーム開始時に縦画面固定・画面消灯防止を設定します</span><button class="micro" id="displayBtn" type="button" hidden>⛶ 画面を再設定</button></div>
   <div class="legend"><span><span class="token a">×3</span>ボールが3つに分裂</span><span><span class="token b">+1</span>残りボールが1増加</span><span>アイテムはバーでキャッチ</span></div>
-  <p class="notice">ボールにはブースト中も重力が働きます。最上段を狙うときは、バー移動範囲の上30%から、なるべく垂直にブースト打ち返し！</p>
+  <p class="notice">ボールにはブースト中も重力が働きます。最上段を狙うときは、バー移動範囲の上30%から、なるべく垂直にブースト打ち返し！ 最後の1個になった耐久ブロックは、60秒間ボールが当たらなければ幅が3倍になります。</p>
 </main>
 <script>
 (() => {
@@ -107,6 +107,9 @@
   // A single reinforced block above five complete rows of seven blocks.
   const BRICK_COLS=7,BRICK_ROWS=5,TOTAL_BRICKS=1+BRICK_COLS*BRICK_ROWS;
   const SPECIAL_HITS=3;
+  // If only the reinforced block remains and goes unhit for 60 seconds of
+  // active gameplay, expand it to three times its original width (once).
+  const LAST_BRICK_EXPAND_SECONDS=60, LAST_BRICK_EXPAND_FACTOR=3;
   // Virtual-pixel physics: constant downward gravity acts on EVERY ball,
   // including a boosted one. The normal return remains unchanged so that
   // non-boosted shots can still break the lower rows.
@@ -126,6 +129,7 @@
   let sensitivityX='medium',sensitivityY='medium';
   let state='ready', score=0, lives=3, best=0, mode='tilt', invert=false, invertY=false, muted=false;
   let balls=[],bricks=[],items=[],sparks=[],stars=[],floatTexts=[];
+  let lastBrickSoloActive=false, lastBrickUnhitSeconds=0;
   let paddle={x:W/2-53,y:PADDLE_Y_CENTER,w:106,h:15,target:W/2,targetY:PADDLE_Y_CENTER};
   let sensor={current:null,reference:null,lastAt:0,readings:0,requested:false,denied:false};
   let touchX=W/2, touchY=PADDLE_Y_CENTER, pointerDown=false, idlePulse=0, shake=0, soundCtx=null, lastTime=0, accum=0;
@@ -261,16 +265,42 @@
   function setScore(n){score+=n;if(score>best){best=score;try{localStorage.setItem('tilt-breaker-best',String(best))}catch(e){}}updateHud()}
   function spawnBricks(){
     bricks=[];
+    lastBrickSoloActive=false;lastBrickUnhitSeconds=0;
     const gapX=7,gapY=8,padX=24,y0=113,bw=(W-2*padX-gapX*(BRICK_COLS-1))/BRICK_COLS,bh=25;
     // Keep exactly the same brick width, height and horizontal spacing as before.
     // The lone brick occupies the center column, while the five full rows
     // are one pitch lower than the former five-row layout.
     const centerCol=Math.floor(BRICK_COLS/2);
     bricks.push({x:padX+centerCol*(bw+gapX),y:y0,w:bw,h:bh,
-      color:palette[0],alive:true,special:true,hp:SPECIAL_HITS});
+      color:palette[0],alive:true,special:true,hp:SPECIAL_HITS,expanded:false});
     for(let row=0;row<BRICK_ROWS;row++)for(let col=0;col<BRICK_COLS;col++){
       bricks.push({x:padX+col*(bw+gapX),y:y0+(row+1)*(bh+gapY),w:bw,h:bh,
         color:palette[row],alive:true,special:false,hp:1});
+    }
+  }
+  function updateLastBrickExpansion(dt,specialHitThisStep){
+    // Called only while the game is running: pauses, menus and inactive tabs
+    // must not consume the 60-second waiting period.
+    const last=bricks.length===1&&bricks[0].alive&&bricks[0].special?bricks[0]:null;
+    if(!last){lastBrickSoloActive=false;lastBrickUnhitSeconds=0;return;}
+    if(!lastBrickSoloActive){
+      // Start counting from the moment the last ordinary brick disappears.
+      lastBrickSoloActive=true;lastBrickUnhitSeconds=0;
+    }
+    if(specialHitThisStep){
+      // Every collision with the reinforced brick restarts the countdown.
+      lastBrickUnhitSeconds=0;return;
+    }
+    if(last.expanded)return; // Never grow it again or shrink it after a hit.
+    lastBrickUnhitSeconds+=dt;
+    if(lastBrickUnhitSeconds>=LAST_BRICK_EXPAND_SECONDS){
+      const cx=last.x+last.w/2,cy=last.y+last.h/2;
+      last.w*=LAST_BRICK_EXPAND_FACTOR;
+      last.x=cx-last.w/2; // Preserve the block's center and height.
+      last.expanded=true;
+      blast(cx,cy,'#ff8d90',24);
+      textPopup(cx,last.y-15,'WIDE ×3','#ffd2d2');
+      playSound(720,.17,'triangle',.06);
     }
   }
   function brickDisplayColor(brick){
@@ -428,6 +458,7 @@
     paddle.y=clamp(paddle.y+(paddle.targetY-paddle.y)*follow,PADDLE_Y_MIN,PADDLE_Y_MAX);
     if(state==='ready'&&balls[0]){balls[0].x=paddle.x+paddle.w/2;balls[0].y=paddle.y-12}
     if(state!=='running'){updateEffects(dt);return}
+    let specialHitThisStep=false;
     for(const b of balls){
       const prevX=b.x,prevY=b.y;
       // Downward gravity ALWAYS applies. An upward-moving boost gets extra
@@ -474,6 +505,7 @@
       }
       for(const brick of bricks){if(!brick.alive)continue;
         if(brickCollision(b,brick,prevX,prevY)){
+          if(brick.special)specialHitThisStep=true;
           brick.hp--;
           if(brick.hp>0){
             // Damage is shown ONLY by its red color (no HP labels).
@@ -495,6 +527,7 @@
     }
     balls=balls.filter(b=>!b.dead);
     bricks=bricks.filter(b=>b.alive);
+    updateLastBrickExpansion(dt,specialHitThisStep);
     for(let i=items.length-1;i>=0;i--){const item=items[i],prevItemY=item.y;item.y+=item.vy*dt;item.pulse+=dt*4;
       const overlap=item.y+item.r>=paddle.y&&item.y-item.r<=paddle.y+paddle.h&&item.x+item.r>=paddle.x&&item.x-item.r<=paddle.x+paddle.w;
       const d0=prevItemY+item.r-prevPaddleY,d1=item.y+item.r-paddle.y;
