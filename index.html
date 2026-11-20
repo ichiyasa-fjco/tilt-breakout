@@ -79,7 +79,7 @@
   </div>
   <div class="stage" id="stage">
     <canvas id="game" aria-label="ブロック崩しのプレイ画面"></canvas>
-    <div class="overlay" id="overlay"><div class="kicker" id="overlayKicker">TILT CONTROL</div><h1 id="overlayTitle">BREAK OUT!</h1><p class="hint" id="overlayText">タブレットを左右・前後に傾けてバーを操作。<br>バーは画面下20%を移動できます。</p></div>
+    <div class="overlay" id="overlay"><div class="kicker" id="overlayKicker">TILT CONTROL</div><h1 id="overlayTitle">BREAK OUT!</h1><p class="hint" id="overlayText">タブレットを傾けてバーを操作。<br>下部20%のバーを上側に寄せると、高いブロックまで届きやすくなります。</p></div>
   </div>
   <div class="actions"><button class="primary" id="playBtn" type="button">▶ ゲーム開始</button><button class="secondary" id="calBtn" type="button">◎ 中心を設定</button></div>
   <section class="controls" aria-label="ゲーム操作設定">
@@ -92,7 +92,7 @@
   </section>
   <div class="displayControl"><span class="displayStatus" id="displayStatus" role="status">ゲーム開始時に縦画面固定・画面消灯防止を設定します</span><button class="micro" id="displayBtn" type="button" hidden>⛶ 画面を再設定</button></div>
   <div class="legend"><span><span class="token a">×3</span>ボールが3つに分裂</span><span><span class="token b">+1</span>残りボールが1増加</span><span>アイテムはバーでキャッチ</span></div>
-  <p class="notice">左右・前後の中心姿勢は「中心を設定」で調整できます。全画面を解除すると縦画面固定も解除されるため、再開時に再設定されます。</p>
+  <p class="notice">ボールには下向きの重力が働きます。最上段を狙うときはバーを移動範囲の上側へ。左右・前後の中心姿勢は「中心を設定」で調整できます。</p>
 </main>
 <script>
 (() => {
@@ -104,11 +104,16 @@
   const $ = id => document.getElementById(id);
   const canvas=$('game'), ctx=canvas.getContext('2d',{alpha:false});
   const ui={score:$('score'),best:$('best'),lives:$('lives'),overlay:$('overlay'),kicker:$('overlayKicker'),title:$('overlayTitle'),overlayText:$('overlayText'),play:$('playBtn'),cal:$('calBtn'),sound:$('soundBtn'),restart:$('restartBtn'),sensorText:$('sensorText'),sensorDot:$('sensorDot'),invert:$('invertBtn'),invertY:$('invertYBtn'),sensitivityX:$('sensitivityX'),sensitivityY:$('sensitivityY'),stage:$('stage'),displayStatus:$('displayStatus'),displayBtn:$('displayBtn')};
-  const BRICK_COLS=7,BRICK_ROWS=5,TOTAL_BRICKS=BRICK_COLS*BRICK_ROWS;
-  // Ordinary blocks are grayscale. The center brick on the top row
-  // becomes progressively red after each surviving hit.
+  // A single reinforced block above five complete rows of seven blocks.
+  const BRICK_COLS=7,BRICK_ROWS=5,TOTAL_BRICKS=1+BRICK_COLS*BRICK_ROWS;
+  const SPECIAL_HITS=5;
+  // Simulation coordinates are in virtual pixels. At the highest paddle
+  // position, a nearly vertical 355 px/s return can just reach the underside
+  // of the reinforced brick (gravity limits its ascent to roughly 435 px).
+  const GRAVITY=145, PADDLE_LAUNCH_SPEED=355;
   const palette=['#eeeeee','#d2d2d2','#b6b6b6','#999999','#7d7d7d'];
-  const damagedRed=['#eeeeee','#edb0b0','#ec6c6c','#e62e2e'];
+  // Index is the number of hits already received by the strong block.
+  const damagedRed=['#eeeeee','#f0bdbd','#ef9797','#e76363','#d92836'];
   // The existing 'medium' gain is preserved for both axes.
   const tiltGain={x:{low:8,medium:12.8,high:19},y:{low:1.8,medium:3.0,high:4.6}};
   let sensitivityX='medium',sensitivityY='medium';
@@ -250,27 +255,32 @@
   function spawnBricks(){
     bricks=[];
     const gapX=7,gapY=8,padX=24,y0=113,bw=(W-2*padX-gapX*(BRICK_COLS-1))/BRICK_COLS,bh=25;
+    // Keep exactly the same brick width, height and horizontal spacing as before.
+    // The lone brick occupies the center column, while the five full rows
+    // are one pitch lower than the former five-row layout.
+    const centerCol=Math.floor(BRICK_COLS/2);
+    bricks.push({x:padX+centerCol*(bw+gapX),y:y0,w:bw,h:bh,
+      color:palette[0],alive:true,special:true,hp:SPECIAL_HITS});
     for(let row=0;row<BRICK_ROWS;row++)for(let col=0;col<BRICK_COLS;col++){
-      const special=row===0 && col===Math.floor(BRICK_COLS/2);
-      bricks.push({x:padX+col*(bw+gapX),y:y0+row*(bh+gapY),w:bw,h:bh,
-        color:palette[row],alive:true,special,hp:special?4:1});
+      bricks.push({x:padX+col*(bw+gapX),y:y0+(row+1)*(bh+gapY),w:bw,h:bh,
+        color:palette[row],alive:true,special:false,hp:1});
     }
   }
   function brickDisplayColor(brick){
-    return brick.special?damagedRed[clamp(4-brick.hp,0,3)]:brick.color;
+    return brick.special?damagedRed[clamp(SPECIAL_HITS-brick.hp,0,SPECIAL_HITS-1)]:brick.color;
   }
   function newBall(x,y,vx,vy){return {x,y,vx,vy,r:R,trail:[],dead:false}}
   function resetBall(){balls=[newBall(paddle.x+paddle.w/2,paddle.y-11,0,0)];state='ready';syncUI()}
   function newGame(){score=0;lives=3;items=[];sparks=[];floatTexts=[];shake=0;paddle.x=W/2-paddle.w/2;paddle.y=PADDLE_Y_CENTER;paddle.target=W/2;paddle.targetY=PADDLE_Y_CENTER;touchX=W/2;touchY=PADDLE_Y_CENTER;spawnBricks();resetBall();updateHud()}
   function syncUI(){const o=ui.overlay;
     if(state==='running'){o.classList.add('hidden');ui.play.textContent='Ⅱ 一時停止'}
-    if(state==='ready'){o.classList.remove('hidden');ui.kicker.textContent=score?'NEXT BALL':'TILT CONTROL';ui.title.textContent=score?'READY?':'BREAK OUT!';ui.overlayText.innerHTML=score?'準備ができたらボールを発射！':'タブレットを左右・前後に傾けてバーを操作。<br>バーは画面下20%を移動できます。';ui.play.textContent=score?'▶ ボールを発射':'▶ ゲーム開始'}
+    if(state==='ready'){o.classList.remove('hidden');ui.kicker.textContent=score?'NEXT BALL':'TILT CONTROL';ui.title.textContent=score?'READY?':'BREAK OUT!';ui.overlayText.innerHTML=score?'準備ができたらボールを発射！':'タブレットを傾けてバーを操作。<br>下部20%のバーを上側に寄せると、高いブロックまで届きやすくなります。';ui.play.textContent=score?'▶ ボールを発射':'▶ ゲーム開始'}
     if(state==='paused'){o.classList.remove('hidden');ui.kicker.textContent='PAUSE';ui.title.textContent='一時停止';ui.overlayText.textContent='再開ボタンでゲームに戻れます';ui.play.textContent='▶ 再開'}
     if(state==='over'){o.classList.remove('hidden');ui.kicker.textContent='GAME OVER';ui.title.textContent='GAME OVER';ui.overlayText.textContent=`最終スコア ${score.toLocaleString('ja-JP')} 点`;ui.play.textContent='↻ もう一度遊ぶ'}
     if(state==='win'){o.classList.remove('hidden');ui.kicker.textContent='CLEAR!';ui.title.textContent='STAGE CLEAR';ui.overlayText.textContent=`すべてのブロックを破壊！ ${score.toLocaleString('ja-JP')} 点`;ui.play.textContent='↻ もう一度遊ぶ'}
   }
   function playSound(f=450,d=.055,type='sine',gain=.055){if(muted)return;try{if(!soundCtx)soundCtx=new(window.AudioContext||window.webkitAudioContext)();if(soundCtx.state==='suspended')soundCtx.resume();const t=soundCtx.currentTime,osc=soundCtx.createOscillator(),vol=soundCtx.createGain();osc.type=type;osc.frequency.setValueAtTime(f,t);osc.frequency.exponentialRampToValueAtTime(Math.max(50,f*.85),t+d);vol.gain.setValueAtTime(gain,t);vol.gain.exponentialRampToValueAtTime(.0001,t+d);osc.connect(vol);vol.connect(soundCtx.destination);osc.start(t);osc.stop(t+d+.005)}catch(e){}}
-  function launch(){let ball=balls[0];if(!ball)return;ball.vx=rnd(-95,95);ball.vy=-Math.sqrt(355**2-ball.vx**2);state='running';syncUI();playSound(520,.11,'triangle')}
+  function launch(){let ball=balls[0];if(!ball)return;ball.vx=rnd(-95,95);ball.vy=-Math.sqrt(PADDLE_LAUNCH_SPEED**2-ball.vx**2);state='running';syncUI();playSound(520,.11,'triangle')}
   function showSensor(message,ok=false,bad=false){ui.sensorText.textContent=message;ui.sensorDot.className='dot'+(ok?' ok':bad?' bad':'')}
   function angle(){const n=window.screen&&window.screen.orientation?window.screen.orientation.angle:(window.orientation||0);return ((n%360)+360)%360}
   function onOrientation(e){
@@ -412,7 +422,12 @@
     if(state==='ready'&&balls[0]){balls[0].x=paddle.x+paddle.w/2;balls[0].y=paddle.y-12}
     if(state!=='running'){updateEffects(dt);return}
     for(const b of balls){
-      const prevX=b.x,prevY=b.y;b.x+=b.vx*dt;b.y+=b.vy*dt;
+      const prevX=b.x,prevY=b.y;
+      // Constant downward gravitational acceleration: upward motion slows,
+      // pauses at its apex, then accelerates back toward the paddle.
+      b.x+=b.vx*dt;
+      b.y+=b.vy*dt+0.5*GRAVITY*dt*dt;
+      b.vy+=GRAVITY*dt;
       b.trail.push({x:b.x,y:b.y});if(b.trail.length>6)b.trail.shift();
       if(b.x-b.r<12){b.x=12+b.r;b.vx=Math.abs(b.vx);playSound(255,.036,'sine',.025)}
       if(b.x+b.r>W-12){b.x=W-12-b.r;b.vx=-Math.abs(b.vx);playSound(255,.036,'sine',.025)}
@@ -427,8 +442,12 @@
         const hitLeft=prevPaddleX+(paddle.x-prevPaddleX)*t;
         if(hitX+b.r>=hitLeft&&hitX-b.r<=hitLeft+paddle.w){
           const off=clamp((hitX-(hitLeft+paddle.w/2))/(paddle.w/2),-1,1);
-          const ang=off*1.12,spd=clamp(Math.hypot(b.vx,b.vy)+5,355,520);
-          b.vx=Math.sin(ang)*spd+(Math.abs(off)<.08?(Math.random()<.5?-10:10):0);b.vy=-Math.cos(ang)*spd;
+          // Use a consistent launch impulse, independent of downward impact
+          // speed. Otherwise gravity would make each return faster and allow
+          // the top brick to be reached from anywhere on the paddle's track.
+          const ang=off*.92;
+          b.vx=Math.sin(ang)*PADDLE_LAUNCH_SPEED+(Math.abs(off)<.08?(Math.random()<.5?-10:10):0);
+          b.vy=-Math.cos(ang)*PADDLE_LAUNCH_SPEED;
           b.y=paddle.y-b.r-.1;
           blast(hitX,paddle.y,'#71edf2',5);playSound(320+Math.abs(off)*170,.06,'triangle',.04);
         }
@@ -437,11 +456,10 @@
         if(brickCollision(b,brick,prevX,prevY)){
           brick.hp--;
           if(brick.hp>0){
-            // The reinforced top-center brick survives its first three hits.
+            // Damage is shown ONLY by its red color (no HP labels).
             const red=brickDisplayColor(brick);
             blast(brick.x+brick.w/2,brick.y+brick.h/2,red,7);
-            textPopup(brick.x+brick.w/2,brick.y-5,'残り'+brick.hp,red);
-            playSound(300+(4-brick.hp)*85,.09,'square',.036);
+            playSound(300+(SPECIAL_HITS-brick.hp)*85,.09,'square',.036);
             shake=.35;
           }else{
             // Award points and roll for an item only when the brick breaks.
@@ -491,16 +509,11 @@
     for(let i=0;i<4;i++){ctx.strokeStyle='#3579a42d';ctx.beginPath();ctx.moveTo(20,PADDLE_ZONE_TOP+24+i*24);ctx.lineTo(W-20,PADDLE_ZONE_TOP+24+i*24);ctx.stroke()}
     for(const brick of bricks){
       const {x,y,w,h}=brick,color=brickDisplayColor(brick);
-      ctx.shadowColor=color;ctx.shadowBlur=brick.special&&brick.hp<4?16:7;
+      ctx.shadowColor=color;ctx.shadowBlur=brick.special&&brick.hp<SPECIAL_HITS?16:7;
       ctx.fillStyle=color;rounded(x,y,w,h,6);ctx.fill();ctx.shadowBlur=0;
       ctx.fillStyle='#ffffff46';rounded(x+2,y+2,w-4,5,2);ctx.fill();
       ctx.fillStyle='#0b15342f';rounded(x+3,y+h-7,w-6,4,2);ctx.fill();
-      if(brick.special){
-        // Remaining hits are also printed for clarity; color progresses to red.
-        ctx.save();ctx.textAlign='center';ctx.textBaseline='middle';
-        ctx.font='900 14px system-ui';ctx.fillStyle=brick.hp===4?'#424242':'#fff';
-        ctx.fillText(String(brick.hp),x+w/2,y+h/2+1);ctx.restore();
-      }
+
     }
     ctx.save();ctx.shadowBlur=shake>0?20:14;ctx.shadowColor='#5ceff6';ctx.fillStyle='#2ce7ee';rounded(paddle.x,paddle.y,paddle.w,paddle.h,8);ctx.fill();ctx.shadowBlur=0;
     ctx.fillStyle='#caffff';rounded(paddle.x+7,paddle.y+2,paddle.w-14,4,2);ctx.fill();ctx.fillStyle='#075e80';rounded(paddle.x+paddle.w/2-9,paddle.y+5,18,6,3);ctx.fill();ctx.restore();
